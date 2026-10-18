@@ -1,8 +1,9 @@
 # Lineage
 
 A 3D evolution game from single cell to galactic core, for one or two players on one keyboard.
+Mould your own cell and creature in a mouse-driven editor, then befriend or hunt your way to the stars.
 
-Static site: no build step. Cloudflare Pages serves the repo root as is (build command empty, output directory `/`).
+Static site with no build step. Cloudflare Pages serves the repo root as it is (build command empty, output directory `/`).
 
 ## Files
 | File | Purpose |
@@ -14,8 +15,14 @@ Static site: no build step. Cloudflare Pages serves the repo root as is (build c
 | _headers | Cloudflare Pages cache rules |
 
 ## Controls
-Player 1: arrows to move, `/ . ; '` for actions 1 to 4, Enter for menus, Right Shift to go back.
-Player 2: WASD to move, `F G R T` for actions 1 to 4, E for menus, Q to go back.
-Esc pauses. In one-player mode both sets work.
+Player 1: arrows to move, `/` attack, `.` special, `;` greet, `'` jump or dodge, Enter to interact (nest, dig, invite, revive), Right Shift to switch target.
+Player 2: WASD to move, `F` attack, `G` special, `R` greet, `T` jump or dodge, E to interact, Q to switch target.
+During a duet the four move keys become sing, dance, charm and pose. Movement follows the camera.
+In the cell stage: move 1 dashes, move 3 lunges, and in an accord move 4 sends your partner DNA.
+Esc pauses. The editor uses the mouse. Two game controllers play as P1 and P2.
+
+## Two players
+Race your rival to the end of each stage, or form an accord to share allies, revive each other and land team combos.
+As rivals you can win a species away from each other, and finish off a downed rival to steal some of their DNA.
 
 Intellectual property of Sidedoor Digital.
