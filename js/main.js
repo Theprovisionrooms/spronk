@@ -58,15 +58,17 @@ function openPause() {
   const html = () => `<div class="eyebrow">Paused · ${STAGE_NAMES[G.stage]} stage</div><h2>${G.players.map(p => esc(p.name)).join(' vs ')}</h2>
     <p>Progress saves at the start of each stage.</p>
     <div class="results">${G.players.map((P, p) => `<div><div class="eyebrow">${G.mode === 2 ? 'P' + (p + 1) + ' · ' : ''}${esc(P.name)} · lineage</div>${P.legacies.length ? P.legacies.map(legacyCard).join('<div style="height:6px"></div>') : '<p>No legacies yet.</p>'}${modsHTML(P)}<div class="eyebrow" style="margin-top:12px">Journal</div>${Disc.journalHTML(P)}</div>`).join('')}</div>
-    <div class="row"><button class="btn primary" data-act="resume">Resume <kbd>Esc</kbd></button><button class="btn" data-act="gfx">Graphics: ${Q.pref === 'auto' ? `Auto (${Q.b.name})` : Q.b.name}</button>${G.mode === 2 ? `<button class="btn" data-act="pad">One controller plays as: P${(Input.padOwner >= 0 ? Input.padOwner : 1) + 1}</button>` : ''}<button class="btn" data-act="restart">Restart this stage</button><button class="btn" data-act="quit">Quit to title</button></div>`;
+    <div class="row"><button class="btn primary" data-act="resume">Resume <kbd>Esc</kbd></button><button class="btn" data-act="mus">Music: ${AudioCfg.label('music')}</button><button class="btn" data-act="sfx">Effects: ${AudioCfg.label('sfx')}</button><button class="btn" data-act="amb">Ambience: ${AudioCfg.label('amb')}</button><button class="btn" data-act="gfx">Graphics: ${Q.pref === 'auto' ? `Auto (${Q.b.name})` : Q.b.name}</button>${G.mode === 2 ? `<button class="btn" data-act="pad">One controller plays as: P${(Input.padOwner >= 0 ? Input.padOwner : 1) + 1}</button>` : ''}<button class="btn" data-act="restart">Restart this stage</button><button class="btn" data-act="quit">Quit to title</button></div>`;
   Modal.open(html(), {
     resume: () => Modal.close(), restart: () => { Modal.close(); startStage(G.stage); }, quit: () => { Modal.close(); openTitle(); },
+    mus: () => { Sfx.init(); AudioCfg.cycle('music'); Modal.rerender(html()); }, sfx: () => { Sfx.init(); AudioCfg.cycle('sfx'); Sfx.good(); Modal.rerender(html()); }, amb: () => { Sfx.init(); AudioCfg.cycle('amb'); Modal.rerender(html()); },
     gfx: () => { const order = ['auto', 'low', 'medium', 'high'], nx = order[(order.indexOf(Q.pref) + 1) % order.length]; Q.pref = nx; Q.save(); Q.set(nx === 'auto' ? Q.auto : nx, true); Modal.rerender(html()); },
     pad: () => { Input.padOwner = (Input.padOwner >= 0 ? Input.padOwner : 1) === 1 ? 0 : 1; Modal.rerender(html()); },
   }, { closable: true });
 }
 $('#b-menu').addEventListener('click', () => { if (!Modal.isOpen) openPause(); });
-$('#b-sound').addEventListener('click', e => { Sfx.init(); Sfx.on = !Sfx.on; e.currentTarget.textContent = Sfx.on ? 'Sound' : 'Muted'; });
+$('#b-sound').textContent = Sfx.on ? 'Sound' : 'Muted';
+$('#b-sound').addEventListener('click', e => { Sfx.init(); Sfx.on = !Sfx.on; AudioCfg.apply(); AudioCfg.save(); e.currentTarget.textContent = Sfx.on ? 'Sound' : 'Muted'; });
 
 function showEnding(kind, winner) {
   const titles = { core: winner >= 0 ? `${G.players[winner].name} reached the galactic core` : 'The galactic core', federation: 'A galaxy united', conquest: winner >= 0 ? `The galaxy belongs to the ${G.players[winner].name}` : 'Conquest', joint: 'Together at the heart of the galaxy' };
@@ -88,6 +90,7 @@ function frame(now) {
   const steps = Math.min(3, Math.max(1, Math.ceil(real / .05 - .001))), dt = Math.min(.05, real / steps);
   try {
     Q.tick(real); /* resolution changes happen before drawing, so a resize never shows a blank frame */
+    if (G.paused !== frame.paused) { frame.paused = G.paused; AudioCfg.apply(); } Music.tick(Math.min(real, .1));
     pollPads();
     if (Editor.active !== editing) { editing = Editor.active; $('#app').classList.toggle('editing', editing); if (!editing) resize(); }
     if (Editor.active) { Editor.update(dt); Editor.render(); }

@@ -82,7 +82,7 @@ const SpaceStage = {
     Disc.unit = 'ly';
     for (const s of stars) {
       if (s.anomaly) Disc.add({ x: s.x, z: s.z, y: s.y, r: 40, see: 500, far: 0, nameAt: 120, name: s.anomaly.name, lore: s.anomaly.lore, icon: s.anomaly.icon, reward: p => { this.openAnomaly(p, s); return ''; } });
-      if (s.relic) Disc.add({ x: s.x, z: s.z, y: s.y, r: 40, see: 500, far: 0, nameAt: 120, name: `Ruins at ${s.name}`, lore: 'Carvings of a tide pool, a cell, a creature, a city, a ship.', icon: '◆', reward: p => { this.takeRelic(p, s.relic); return ''; } });
+      if (s.relic) Disc.add({ x: s.x, z: s.z, y: s.y, r: 40, see: 500, far: 0, nameAt: 120, name: `Ruins at ${s.name}`, lore: 'Carvings of a tide pool, a cell, a creature, a city, a ship.', icon: '◆', reward: p => { this.takeRelic(p, s.relic, true); return ''; } });
     }
     this.buildVisuals(seed);
     this.pirates = [0, 1, 2].map(() => this.spawnPirate());
@@ -149,7 +149,7 @@ const SpaceStage = {
   allies(p) { return this.emps.filter(e => !e.player && e.alive && e.ally[p]); },
   dps(p) { return SHIP_UP.weapons.val[this.E(p).up.weapons] * G.players[p].mods.dmg * (1 + .3 * this.allies(p).length + (G.accord && G.mode === 2 ? .25 : 0)); },
   colonies(p) { const out = []; for (const s of this.stars) if (s.owner === p) for (const pl of s.planets) if (pl.col) out.push({ s, pl }); return out; },
-  income(p) { let c = 0; for (const { pl } of this.colonies(p)) c += pl.col.level * 1.4; const pacts = this.emps.filter(x => !x.player && x.alive && x.pact[p]).length; return c * G.players[p].mods.econ + pacts * 2 + (G.accord && G.mode === 2 ? 1 : 0); },
+  income(p) { let c = 0; for (const { pl } of this.colonies(p)) c += pl.col.level * 1.1; const pacts = this.emps.filter(x => !x.player && x.alive && x.pact[p]).length; return c * G.players[p].mods.econ + pacts * 2 + (G.accord && G.mode === 2 ? 1 : 0); },
   claim(s, id) { s.owner = id; const best = s.planets.find(p => p.T >= 1) || s.planets.find(p => p.T >= 0); if (best) best.col = { level: 1 }; if (this.terr) this.paintAll(); },
   freeWorld(p, from) { let best = null, bd = 1e9; for (const s of this.stars) { if (s.core || (s.owner >= 0 && s.owner !== p)) continue; const pl = s.planets.find(x => x.T >= 1 && !x.col); if (!pl) continue; const d = Math.hypot(s.x - from.x, s.z - from.z); if (d < bd) { bd = d; best = { s, pl }; } } return best; },
   colonise(p, s, pl, free) {
@@ -157,12 +157,12 @@ const SpaceStage = {
     pl.col = { level: 1 }; s.owner = p; e.stat.colonized++; this.paintAll(); Sfx.good(p); toastP(p, `Colony founded at ${s.name}.`, 'good');
   },
   inOrbit(q) { if (q.battle) return q.battle.star; let best = null, bd = 34; for (const s of this.stars) { const d = Math.hypot(s.x - q.x, s.z - q.z); if (d < bd) { bd = d; best = s; } } return best; },
-  battle(p, b) { const q = this.pl[p]; if (q.battle) return; q.battle = { ...b, max: b.hp }; q.vx = q.vz = 0; Sfx.hit(p); toastP(p, `Battle with ${b.name}! ${KEYLABEL[p].back} to retreat.`, 'warn'); },
+  battle(p, b) { const q = this.pl[p]; if (q.battle) return; q.battle = { ...b, max: b.hp }; q.vx = q.vz = 0; Sfx.battle(p); toastP(p, `Battle with ${b.name}! ${KEYLABEL[p].back} to retreat.`, 'warn'); },
   endBattle(q, won) {
     const b = q.battle, e = this.E(q.p); q.battle = null; Menus[q.p].close();
     if (!won) { const lost = Math.min(e.credits, 60); e.credits -= lost; toastP(q.p, `Your ship was crippled and towed home. Lost ${Math.round(lost)} credits.`, 'bad'); q.x = e.home.x + 30; q.z = e.home.z; q.y = e.home.y; q.vx = q.vz = 0; q.hp = this.maxHull(q.p) * .4; Sfx.bad(q.p); return; }
     Sfx.good(q.p); e.stat.won++;
-    if (b.reward) { e.credits += b.reward; toastP(q.p, `You won. +${b.reward} credits.`, 'good'); }
+    if (b.reward) { e.credits += b.reward; Sfx.coin(q.p); toastP(q.p, `You won. +${b.reward} credits.`, 'good'); }
     if (b.kind === 'pirate') b.pirate.alive = false;
     if (b.kind === 'guard') { b.site.guard = 0; this.takeRelic(q.p, b.site); }
     if (b.kind === 'siege') { const em = b.emp; e.stat.wars++; if (em.relic) { em.relic = false; e.relics++; toastP(q.p, `You took the ${em.name} relic from their homeworld.`, 'good'); this.relicNews(q.p); } em.power = Math.max(4, em.power - 6); toastP(q.p, `The ${em.name} sue for peace.`, 'good'); em.war[q.p] = false; em.rel[q.p] = -20; }
@@ -171,10 +171,17 @@ const SpaceStage = {
       if (em.player) toastP(em.p, `You lost ${s.name} to P${q.p + 1}.`, 'bad'); else { em.power = Math.max(4, em.power - 3); if (!this.stars.some(x => x.owner === em.id)) { em.alive = false; toastAll(`The ${em.name} are no more.`, 'warn'); this.checkFederation(); } }
     }
   },
-  takeRelic(p, site) {
+  /* how a fight would likely go, so nobody flies into a battle they cannot win without warning */
+  odds(p, hp, dps) { const win = hp / this.dps(p), lose = this.pl[p].hp / dps; return win < lose * .7 ? 'you should win' : win < lose * 1.1 ? 'a close fight' : 'you would likely lose: upgrade weapons and hull at your shipyard first'; },
+  guardDps(site) { return 12 + site.guard * .05; },
+  takeRelic(p, site, auto) {
     if (site.taken) { toastP(p, 'The ruins are empty. Someone got here first.'); return; }
-    if (site.guard > 0) { this.battle(p, { kind: 'guard', hp: site.guard, dps: 12 + site.guard * .05, star: site.s, site, name: 'an ancient guardian' }); return; }
-    site.taken = true; this.E(p).relics++; Sfx.good(p); this.fx.burst(site.s.x, site.s.y + 10, site.s.z, '#ffd34d', 40, 20, 1.4);
+    if (site.guard > 0) {
+      const o = this.odds(p, site.guard, this.guardDps(site));
+      if (auto && o.startsWith('you would')) { toastP(p, `An ancient guardian sleeps in these ruins. It looks too strong for your ship right now. Come back with better weapons and hull, then open the system to face it.`, 'warn'); return; }
+      this.battle(p, { kind: 'guard', hp: site.guard, dps: this.guardDps(site), star: site.s, site, name: 'an ancient guardian' }); return;
+    }
+    site.taken = true; this.E(p).relics++; Sfx.relic(p); this.fx.burst(site.s.x, site.s.y + 10, site.s.z, '#ffd34d', 40, 20, 1.4);
     toastP(p, `You carry a Relic of the First Ones (${this.relicsFor(p)} of ${this.need(p)}).`, 'good'); this.relicNews(p);
   },
   relicNews(p) { if (this.relicsFor(p) >= this.need(p)) { toastP(p, 'The relics hum in unison. The galactic core will open for you. Set your compass on it.', 'good'); this.pl[p].compass = 3; } if (G.mode === 2) toastP(other(p), `P${p + 1} has ${this.E(p).relics} relic${this.E(p).relics === 1 ? '' : 's'}.`); },
@@ -192,6 +199,7 @@ const SpaceStage = {
     const q = this.pl[p]; if (!q) return; const s = this.inOrbit(q);
     if (act === 'back') { if (q.battle) { const b = q.battle; q.battle = null; const e = this.E(p); e.credits = Math.max(0, e.credits - 30); q.x += 70; q.vx = 60; toastP(p, 'You break off and run. -30 credits.', 'warn'); if (b.kind === 'pirate') b.pirate.cool = 20; return; } q.compass = (q.compass + 1) % 4; toastP(p, `Compass: ${['the nearest unexplored star', 'the nearest relic you know of', 'home', 'the galactic core'][q.compass]}.`); Sfx.click(p); return; }
     if (act === 'menu') { this.openEmpire(p); return; }
+    if (act === 'a3') { Sfx.whoosh(p); return; }
     if (q.battle) return;
     if (act === 'a1') { if (s) this.openSystem(p, s); else toastP(p, 'Fly to a star first.'); return; }
     if (act === 'a2') { const own = s && s.owner >= 0 ? this.emps[s.owner] : null; if (own && own.id !== p) this.openDiplo(p, own); else toastP(p, 'No foreign empire here.'); return; }
@@ -211,9 +219,9 @@ const SpaceStage = {
       sub: () => `${fmt(e.credits)} credits${s.relic && !s.relic.taken ? ' · ancient ruins here' : ''}${s.anomaly && !s.anomaly.done[p] ? ' · anomaly here' : ''}`,
       items: () => {
         const out = [], mine = s.owner === p || s.owner < 0;
-        if (s.relic && !s.relic.taken) out.push({ label: s.relic.guard ? 'Face the ruin guardian' : 'Take the relic', desc: s.relic.guard ? 'Something old wakes when you land. Win and the relic is yours.' : 'A Relic of the First Ones.', onSelect: () => this.takeRelic(p, s.relic), close: true });
+        if (s.relic && !s.relic.taken) out.push({ label: s.relic.guard ? 'Face the ruin guardian' : 'Take the relic', desc: s.relic.guard ? `Something old guards it. Win and the relic is yours. Odds: ${this.odds(p, s.relic.guard, this.guardDps(s.relic))}.` : 'A Relic of the First Ones.', onSelect: () => this.takeRelic(p, s.relic), close: true });
         if (s.anomaly && !s.anomaly.done[p]) out.push({ label: `Deal with ${s.anomaly.name}`, onSelect: () => this.openAnomaly(p, s) });
-        s.planets.forEach(pl => { const k = PLANET_KINDS[pl.kind]; out.push({ head: true, label: `${k.label}${pl.homeworld ? ' · homeworld' : ''} · ${pl.T < 0 ? 'cannot live here' : pl.T === 0 ? 'harsh' : 'habitable'}${pl.col ? ' · colony' : ''}` }); if (mine && !pl.col && pl.T >= 1) out.push({ label: 'Found a colony', value: 150, desc: '+1.4 credits a second.', disabled: e.credits < 150, onSelect: () => this.colonise(p, s, pl) }); });
+        s.planets.forEach(pl => { const k = PLANET_KINDS[pl.kind]; out.push({ head: true, label: `${k.label}${pl.homeworld ? ' · homeworld' : ''} · ${pl.T < 0 ? 'cannot live here' : pl.T === 0 ? 'harsh' : 'habitable'}${pl.col ? ' · colony' : ''}` }); if (mine && !pl.col && pl.T >= 1) out.push({ label: 'Found a colony', value: 150, desc: '+1.1 credits a second.', disabled: e.credits < 150, onSelect: () => this.colonise(p, s, pl) }); });
         if (s.owner === p) { out.push({ head: true, label: 'Shipyard' }); for (const k in SHIP_UP) { const U = SHIP_UP[k], lv = e.up[k], c = U.lv[lv]; out.push({ label: `${U.name} ${lv}/3`, value: lv >= 3 ? 'max' : c, desc: lv >= 3 ? U.desc(U.val[lv]) : 'Next: ' + U.desc(U.val[lv + 1]), disabled: lv >= 3 || e.credits < c, onSelect: () => { if (lv >= 3 || e.credits < c) return; e.credits -= c; e.up[k]++; if (k === 'hull') q.hp = this.maxHull(p); Sfx.good(p); } }); } out.push({ label: 'Repair the hull', value: 'free', disabled: q.hp >= this.maxHull(p) - 1, onSelect: () => { q.hp = this.maxHull(p); } }); }
         if (s.owner >= 0 && s.owner !== p) out.push({ label: 'Talk to them', value: KEYLABEL[p].a2, onSelect: () => this.openDiplo(p, this.emps[s.owner]) }, { label: 'Attack this system', value: KEYLABEL[p].a4, onSelect: () => this.attack(q), close: true });
         out.push({ label: 'Close', close: true, onSelect: () => {} }); return out;
@@ -232,7 +240,7 @@ const SpaceStage = {
         { label: 'Send a gift', value: 100, disabled: e.credits < 100, onSelect: () => { if (e.credits < 100) return; e.credits -= 100; const g = Math.round(14 * G.players[p].mods.social * (x.persona === 'trader' ? 1.3 : x.persona === 'warlike' ? .7 : 1)); x.rel[p] = Math.min(100, x.rel[p] + g); toastP(p, `Gift accepted. Attitude +${g}.`, 'good'); } },
         ...(!x.pact[p] && !x.ally[p] ? [{ label: 'Trade pact', value: x.rel[p] < 25 ? 'needs 25' : 150, desc: '+2 credits a second, and they warm to you over time.', disabled: e.credits < 150 || x.rel[p] < 25, onSelect: () => { if (e.credits < 150 || x.rel[p] < 25) return; e.credits -= 150; x.pact[p] = true; x.rel[p] += 5; toastP(p, `Trade pact signed with the ${x.name}.`, 'good'); } }] : []),
         ...(!x.ally[p] ? [{ label: 'Form an alliance', value: rivalAlly ? `P${other(p) + 1}'s ally` : x.rel[p] < 70 ? 'needs 70' : '', desc: x.relic ? 'Allies fight beside you, and they will give you their relic.' : 'Allies fight beside you.', disabled: rivalAlly || x.rel[p] < 70, onSelect: () => { if (rivalAlly || x.rel[p] < 70) return; x.ally[p] = true; x.pact[p] = true; e.stat.allied++; Sfx.good(p); toastP(p, `The ${x.name} are now your allies.`, 'good'); if (x.relic) { x.relic = false; e.relics++; toastP(p, `As a sign of friendship, the ${x.name} give you their relic.`, 'good'); this.relicNews(p); } this.checkFederation(); } }] : []),
-        ...(x.relic && x.persona === 'trader' && !x.ally[p] ? [{ label: 'Buy their relic', value: 600, desc: 'Traders will sell anything for the right price.', disabled: e.credits < 600, onSelect: () => { if (e.credits < 600 || !x.relic) return; e.credits -= 600; x.relic = false; e.relics++; toastP(p, `You bought the ${x.name} relic.`, 'good'); this.relicNews(p); } }] : []),
+        ...(x.relic && x.persona === 'trader' && !x.ally[p] ? [{ label: 'Buy their relic', value: 900, desc: 'Traders will sell anything for the right price.', disabled: e.credits < 900, onSelect: () => { if (e.credits < 900 || !x.relic) return; e.credits -= 900; x.relic = false; e.relics++; toastP(p, `You bought the ${x.name} relic.`, 'good'); this.relicNews(p); } }] : []),
         ...(!x.ally[p] ? [{ label: 'Declare war', desc: x.relic ? 'Take their homeworld and their relic is yours.' : '', onSelect: () => { x.war[p] = true; x.pact[p] = false; x.rel[p] = Math.min(x.rel[p], -40); toastP(p, `You declared war on the ${x.name}.`, 'warn'); }, close: true }] : []),
         { label: 'Close', close: true, onSelect: () => {} }] });
   },
@@ -357,7 +365,8 @@ const SpaceStage = {
     pane.stat('cr', `${fmt(e.credits)} +${this.income(i).toFixed(1)}`); pane.stat('col', this.colonies(i).length); pane.stat('ex', `${this.stars.filter(x => x.visited[i]).length}/${this.stars.length - 1}`); pane.stat('won', `${Disc.count(i)}/${Disc.list.length}`);
     const foreign = s && s.owner >= 0 && s.owner !== i;
     pane.acts(q.battle ? [{ act: 'back', label: 'Retreat', hot: true }] : [{ act: 'a1', label: 'System', off: !s, hot: !!s }, { act: 'a2', label: 'Talk', off: !foreign }, { act: 'a4', label: 'Attack', off: !foreign }, { act: 'a3', label: 'Boost' }, { act: 'menu', label: 'Empire' }, { act: 'back', label: 'Compass' }]);
-    pane.prompt(q.battle ? `Battle with ${q.battle.name}: enemy ${Math.max(0, Math.round(q.battle.hp))} · your hull ${Math.round(q.hp)}` : s ? (s.core ? 'The galactic core' : `In orbit at ${s.name}${s.owner === i ? ' · shipyard open' : ''}`) : '');
+    pane.prompt(q.battle ? `Battle with ${q.battle.name}: enemy ${Math.max(0, Math.round(q.battle.hp))} · your hull ${Math.round(q.hp)}` : s ? (s.core ? 'The galactic core' : `In orbit at ${s.name}${s.owner === i ? ' · shipyard open' : ''}${s.relic && !s.relic.taken ? ` · ruins here, press ${KEYLABEL[i].a1}` : ''}${s.anomaly && !s.anomaly.done[i] ? ` · anomaly, press ${KEYLABEL[i].a1}` : ''}`) : '');
   },
+  musicMood() { return this.pl.some(q => q.battle) ? 1 : this.pirates.some(pr => pr.alive && this.pl.some(q => Math.hypot(pr.x - q.x, pr.z - q.z) < 220)) ? .4 : 0; },
   exit() {},
 };

@@ -9,7 +9,8 @@ Static site with no build step. Cloudflare Pages serves the repo root as it is (
 | File | Purpose |
 |---|---|
 | index.html | Page markup and styles, loads the scripts in order |
-| js/core.js | Helpers, input, sound, game state, legacies, saves |
+| js/core.js | Helpers, input, game state, legacies, saves |
+| js/audio.js | Synthesised sound effects, ambience and generative music for each stage |
 | js/ui.js | Player HUD panes, key-driven menus, the shared modal |
 | js/engine.js | Graphics tiers, renderer, split screen, stage flow, discoveries, post-processing |
 | js/bodies.js | Mouldable bodies: parts, baking, the animated creature |
@@ -28,6 +29,10 @@ The game picks Low, Medium or High from the graphics chip, then watches the real
 render resolution when frames slow down and drops a tier if that is not enough. Change it in the pause menu
 (Auto, Low, Medium, High); the choice is remembered.
 Low uses simple shading, soft blob shadows and lighter scenery. High adds real shadows, bloom and a colour grade.
+
+## Sound
+Every stage has its own ambient music, made live in the browser so there are no audio files to download. Drums build when you are in danger.
+The pause menu sets Music, Effects and Ambience levels separately, and the Sound button mutes everything. Settings are remembered.
 
 ## Pace
 No stage is a race. Reaching a stage's goal makes your species ready to evolve, and you choose when to go.

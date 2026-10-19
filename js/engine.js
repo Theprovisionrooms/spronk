@@ -47,7 +47,7 @@ const Q = {
   },
   /* real wall-clock frame time, not the capped game step */
   tick(realDt) {
-    this.frame++; const w = this.win; w.t += realDt; w.n++; if (w.t < 1.5) return;
+    this.frame++; if (this.grace > 0) { this.grace -= realDt; this.win = { t: 0, n: 0, slow: 0, fast: 0 }; return; } const w = this.win; w.t += realDt; w.n++; if (w.t < 1.5) return;
     this.fps = w.n / w.t; w.t = 0; w.n = 0; if (G.paused || Editor.active || Modal.isOpen) return;
     if (this.fps < 40) { w.slow++; w.fast = 0; } else if (this.fps > 56) { w.fast++; w.slow = 0; } else { w.slow = 0; w.fast = 0; }
     if (w.slow >= 1 && this.scale > this.b.minScale + .01) { this.scale = Math.max(this.b.minScale, this.scale - (this.fps < 24 ? .15 : .08)); w.slow = 0; this.apply(); }
@@ -184,7 +184,8 @@ function setStage(st) {
   if (S && S.exit) S.exit(); if (S && S.scene) disposeScene(S.scene);
   for (const m of Menus) m.close(); for (const p of Panes) p.clear(); for (const c of cams) if (c.view && c.view.enabled) c.clearViewOffset();
   Flow.ready = [null, null]; Flow.done = [null, null]; Flow.finishing = false; Disc.reset();
-  S = st; st.enter(); S._snap = 3; updateStageBar(); updateAccord();
+  S = st; st.enter(); S._snap = 3; updateStageBar(); updateAccord(); Q.grace = 3;
+  Music.play(st.idx === undefined ? 'title' : ['cell', 'creature', 'tribe', 'civ', 'space'][st.idx]);
 }
 function updateStageBar() { const b = $('#stagebar'); b.hidden = !S || S.idx === undefined; [...b.children].forEach((s, j) => s.className = j < G.stage ? 'done' : j === G.stage ? 'on' : ''); }
 function updateAccord() { const a = $('#accord'); a.hidden = G.mode !== 2 || !S || S.idx === undefined; a.className = G.accord ? 'on' : ''; a.textContent = G.accord ? 'In accord · shared prosperity' : 'Rivals'; }
@@ -216,7 +217,7 @@ const canHarm = () => !G.accord;
 /* a stage calls this when a player meets its goal; nothing ends until they choose to evolve */
 function playerDone(p, style, lines) {
   if (Flow.ready[p] || Flow.finishing || !S || S.idx === undefined) return;
-  Flow.ready[p] = { style, lines }; Sfx.good(p);
+  Flow.ready[p] = { style, lines }; Sfx.ready(p);
   toastP(p, `Your species is ready to evolve into the ${STAGE_NAMES[S.idx + 1]} stage. There is no rush: explore as long as you like, then ${S.evolveHint ? S.evolveHint(p) : 'evolve from your menu'}.`, 'good');
   if (G.mode === 2 && !Flow.done[other(p)]) toastP(other(p), `P${p + 1} is ready to evolve. Take your time.`);
   flowChip(p);
@@ -256,7 +257,7 @@ function finishStage() {
     recalcMods(P); Panes[p].chip('');
   }
   if (G.accord) G.accordStages++;
-  G.stage = idx + 1; saveGame(); Sfx.good();
+  G.stage = idx + 1; saveGame(); Sfx.evolve();
   const ready = [false, false];
   const html = () => `<div class="eyebrow">Stage ${idx + 1} complete</div><h2>${['Out of the water', 'A mind awakens', 'The first city', 'To the stars'][idx]}</h2>
     <div class="results">${G.players.slice(0, G.mode).map((P, p) => { const d = Flow.done[p], ls = P.legacies.filter(l => l.stage === idx); return `<div><div class="who" style="margin-bottom:6px"><i style="background:${hueCss(P.hue)};width:10px;height:10px;border-radius:2px;display:inline-block"></i> ${G.mode === 2 ? 'P' + (p + 1) + ' · ' : ''}${esc(P.name)}</div>${d.lines.map(l => `<p style="margin:4px 0">${esc(l)}</p>`).join('')}${ls.map(legacyCard).join('<div style="height:8px"></div>')}${modsHTML(P)}</div>`; }).join('')}</div>
@@ -299,7 +300,7 @@ const Disc = {
   },
   find(s, p) {
     s.found[p] = true; const P = G.players[p]; P.journal = P.journal || []; P.journal.push({ stage: S.idx, name: s.name });
-    const got = s.reward ? s.reward(p) : ''; Sfx.good(p); Sfx.note(5, p);
+    const got = s.reward ? s.reward(p) : ''; Sfx.discover(p);
     toastP(p, `Discovered: ${s.name}. ${s.lore}${got ? ' ' + got : ''}`, 'good');
     if (S && S.fx) S.fx.burst(s.x, (s.y || 0) + 4, s.z, '#ffe08a', 30, 10, 1.2, s.up ? 0 : 4);
   },

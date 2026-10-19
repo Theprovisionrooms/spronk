@@ -1,7 +1,7 @@
 /* Lineage | stage-cell. Intellectual property of Sidedoor Digital. */
 'use strict';
 /* ============================== STAGE 1: CELL ============================== */
-const CELL_GOAL = 160;
+const CELL_GOAL = 180, CELL_MAX = 320; /* growth stops at CELL_MAX so a cell that keeps exploring after its goal stays playable */
 const FLAG_SEGS = 7;
 const CellStage = {
   idx: 0,
@@ -63,7 +63,7 @@ const CellStage = {
     if (!q.tag) { q.tag = new THREE.Mesh(sharedGeo('ring', () => new THREE.RingGeometry(1.15, 1.3, 32)), new THREE.MeshBasicMaterial({ color: col3(P.hue, .8, .6), transparent: true, opacity: .8, side: THREE.DoubleSide })); q.tag.rotation.x = -Math.PI / 2; this.scene.add(q.tag); }
   },
   recalc(q) {
-    const A = q.ab.A, P = G.players[q.p];
+    q.mass = Math.min(q.mass, CELL_MAX); const A = q.ab.A, P = G.players[q.p];
     q.k = .8 + Math.sqrt(q.mass) * .16; q.r = q.B.radius * q.k * .9;
     q.speed = (7 + A.speed * 2.6 + A.turn * .6) * (.9 + q.k * .1);
     const old = q.maxhp; q.maxhp = (30 + A.armor * 18 + q.k * 14 + q.B.ab.vol * 20) * P.mods.hp; if (old > 1) q.hp = Math.min(q.maxhp, q.hp + Math.max(0, q.maxhp - old));
@@ -189,7 +189,7 @@ const CellStage = {
     if (q.mass >= CELL_GOAL && !Flow.ready[q.p]) {
       const tot = q.plant + q.meat, mf = tot ? q.meat / tot : .5, dt2 = q.ab.diet;
       const style = dt2 === 'carn' ? 'aggr' : dt2 === 'herb' ? 'social' : mf > .7 ? 'aggr' : mf < .3 ? 'social' : 'mixed';
-      P.diet = style === 'aggr' ? 'carn' : style === 'social' ? 'herb' : 'omni'; P.dna = Math.floor(q.dna * .5);
+      P.diet = style === 'aggr' ? 'carn' : style === 'social' ? 'herb' : 'omni'; P.dna = Math.min(80, Math.floor(q.dna * .5));
       playerDone(q.p, style, [`Ate ${Math.round(mf * 100)}% meat, killed ${q.kills} cells, died ${q.deaths} times.`, `Diet locked in: ${DIET_WORD[P.diet]}. Time to grow legs.`]);
     }
     if (q.cr.st.bite > 0) q.cr.st.bite -= dt;
@@ -326,6 +326,7 @@ const CellStage = {
     pane.acts([{ act: 'a1', label: 'Dash', icon: 'dash', cd: q.dashCd > 0 ? q.dashCd / 3 : 0 }, ...(A.shock ? [{ act: 'a2', label: 'Shock', icon: 'shock', cd: q.zapCd > 0 ? q.zapCd / 5 : 0 }] : []), { act: 'a3', label: q.bite ? 'Lunge' : 'Ram', icon: 'bite', cd: q.lungeCd > 0 ? q.lungeCd / .9 : 0 }, ...(G.mode === 2 && G.accord ? [{ act: 'a4', label: 'Gift 10', icon: 'mate', off: q.dna < 10 }] : []), { act: 'menu', label: 'Editor', icon: 'edit', hot: q.dna >= 15 }, { act: 'back', label: 'Menu', icon: 'menu', hot: canEvolve(q.p) }]);
     if (!q.dead) pane.prompt(this.cells.some(n => n.windup > 0 && n.wTarget === q) ? 'Incoming lunge: dash away!' : this.vents.some(v => Math.hypot(q.x - v.x, q.z - v.z) < v.r + 6) ? 'Hot vent: it burns' : q.ab.diet === 'none' ? 'You have no mouth! Add one in the editor.' : '');
   },
+  musicMood() { return this.pl.some(q => this.cells.some(n => n.windup > 0 && n.wTarget === q) || (this.boss && Math.hypot(this.boss.x - q.x, this.boss.z - q.z) < 60)) ? 1 : this.bloom ? .3 : 0; },
   summary(p) { const q = this.pl[p], tot = q.plant + q.meat, mf = tot ? q.meat / tot : .5; return [`Ate ${Math.round(mf * 100)}% meat, killed ${q.kills} cells, died ${q.deaths} times.`, `Diet locked in: ${DIET_WORD[G.players[p].diet]}. Time to grow legs.`]; },
   evolveHint(p) { return `press ${KEYLABEL[p].back} for the cell menu`; },
   /* curiosities on the sea floor: big glowing shapes far below the swimming plane */
@@ -350,7 +351,7 @@ const CellStage = {
       Disc.add({ x, z, y: -20, r: 16, see: 120, far: 260, name: K.name, lore: K.lore, icon: '✧', beacon, reward: p => { const q = this.pl[p]; q.dna += 12; q.mass += 8; q.hp = q.maxhp; this.recalc(q); return '+12 DNA, a growth spurt, and full health.'; } });
     });
   },
-  forceStyle(p) { const d = this.pl[p].ab.diet; G.players[p].diet = d === 'carn' ? 'carn' : d === 'herb' ? 'herb' : 'omni'; G.players[p].dna = Math.floor(this.pl[p].dna * .5); return d === 'carn' ? 'aggr' : d === 'herb' ? 'social' : 'mixed'; },
+  forceStyle(p) { const d = this.pl[p].ab.diet; G.players[p].diet = d === 'carn' ? 'carn' : d === 'herb' ? 'herb' : 'omni'; G.players[p].dna = Math.min(80, Math.floor(this.pl[p].dna * .5)); return d === 'carn' ? 'aggr' : d === 'herb' ? 'social' : 'mixed'; },
   exit() { if (this.bloom) this.scene.remove(this.bloom.m); for (const q of this.pl) if (q.cr) q.cr.dispose(); for (const n of this.cells) n.cr.dispose(); },
 };
 const _tv3 = new THREE.Vector3(), _kv3 = new THREE.Vector3();

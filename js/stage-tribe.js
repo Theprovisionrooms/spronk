@@ -211,6 +211,7 @@ const TribeStage = {
     else { const t = TRIBE_TOOLS.filter(t => q.tools[t.k] < t.max); if (t.length) { const k = pick(t); q.tools[k.k]++; this.refreshOwn(p); if (k.k === 'torch') q.village.torch = true; extra = `The old ones left something behind: +1 ${k.name.toLowerCase()}.`; } else extra = '+40 food.'; }
     return `+40 food. ${extra}`;
   },
+  musicMood() { if (this.pl.some(q => this.villages.some(v => v.warn[q.p] > 0 || (v.war[q.p] && this.units.some(u => u.state === 'raid' && u.spot === q.village))))) return 1; if (this.pl.some(q => q.chief.state === 'fight' || this.units.some(u => u.side.k === 'beast' && Math.hypot(u.x - q.chief.x, u.z - q.chief.z) < 50))) return .8; return this.day.isNight ? .3 : .45; },
   forceStyle(p) { const con = this.villages.filter(v => v.by === p && v.how === 'conquered').length, al = this.villages.filter(v => v.by === p && v.how === 'allied').length; return con > al ? 'aggr' : al > con ? 'social' : 'mixed'; },
   updatePlayer(q, dt) {
     const c = q.chief, P = G.players[q.p], pane = Panes[q.p]; q.spearCd -= dt;
@@ -259,7 +260,7 @@ const TribeStage = {
     v.hp = Math.min(v.maxhp, v.hp + 1.5 * dt);
     const dmgk = 1 - v.hp / v.maxhp; v.huts.forEach((h, i) => h.rotation.x = dmgk > (i + 1) * .2 ? .35 : 0);
     if (v.owner >= 0) { // a player's home village
-      if (v.hp <= 0) { const q = this.pl[v.owner], lost = Math.floor(q.food / 2); q.food -= lost; v.hp = v.maxhp * .5; toastP(v.owner, `Your village was burned. ${lost} food lost.`, 'bad'); const by = v.lastBy; if (by && by.side.k === 'player') { this.pl[by.side.p].food += lost; toastP(by.side.p, `You plundered ${lost} food from P${v.owner + 1}.`, 'good'); } for (const u of this.units) if (u.state === 'raid' && u.spot === v) { u.state = 'idle'; } }
+      if (v.hp <= 0) { const q = this.pl[v.owner], lost = Math.floor(q.food / 3); q.food -= lost; v.hp = v.maxhp * .5; for (const o of this.villages) if (o.owner < 0) o.raidT[v.owner] = Math.max(o.raidT[v.owner], rand(180, 240)); toastP(v.owner, `Your village was burned. ${lost} food lost.`, 'bad'); const by = v.lastBy; if (by && by.side.k === 'player') { this.pl[by.side.p].food += lost; toastP(by.side.p, `You plundered ${lost} food from P${v.owner + 1}.`, 'good'); } for (const u of this.units) if (u.state === 'raid' && u.spot === v) { u.state = 'idle'; } }
       return;
     }
     if (v.by >= 0) { if (v.how === 'allied') { v.giftT += dt; if (v.giftT > 25) { v.giftT = 0; this.pl[v.by].food += 8 * G.players[v.by].mods.econ; } } return; }
@@ -267,7 +268,7 @@ const TribeStage = {
     for (let p = 0; p < G.mode; p++) {
       if (v.rel[p] >= 100) { this.allyTribe(v, p); return; }
       if (v.rel[p] < 20 || v.war[p]) {
-        if (v.warn[p] > 0) { v.warn[p] -= dt; if (v.warn[p] <= 0) { v.war[p] = true; const mine = this.units.filter(u => u.side.k === 'tribe' && u.side.id === v.id && u.state !== 'fight'); mine.slice(0, 2 + Math.floor(this.t / 200)).forEach(u => { u.state = 'raid'; u.spot = this.pl[p].village; }); toastP(p, `The ${v.name} are raiding your village!`, 'bad'); } }
+        if (v.warn[p] > 0) { v.warn[p] -= dt; if (v.warn[p] <= 0) { v.war[p] = true; const mine = this.units.filter(u => u.side.k === 'tribe' && u.side.id === v.id && u.state !== 'fight'); mine.slice(0, 2 + Math.floor(this.t / 200)).forEach(u => { u.state = 'raid'; u.spot = this.pl[p].village; }); toastP(p, `The ${v.name} are raiding your village!`, 'bad'); Sfx.battle(p); } }
         else { v.raidT[p] -= dt; if (v.raidT[p] <= 0) { v.warn[p] = 10; v.raidT[p] = rand(90, 130); toastP(p, `The ${v.name} are gathering warriors to raid you. 10 seconds.`, 'warn'); Sfx.bad(p); } }
       }
     }
@@ -305,7 +306,7 @@ const TribeStage = {
       case 'fight': { const t = u.target; if (!t || t.dead || t.hp <= 0 || Math.hypot(t.x - u.x, t.z - u.z) > 60) { const pv = u.prev || { state: S2.k === 'player' ? 'follow' : 'idle' }; u.state = pv.state === 'fight' ? (S2.k === 'player' ? 'follow' : 'idle') : pv.state; u.spot = pv.spot; u.target = null; u.prev = null; break; } this.fightStep(u, t, dt); return; }
       case 'follow': { const c = q.chief, fl = this.followers(S2.p), i = fl.indexOf(u), row = Math.floor(i / 4), col = i % 4, fa = c.a + Math.PI, fx = c.x + Math.cos(fa) * (5 + row * 3.5) + Math.cos(fa + Math.PI / 2) * (col - 1.5) * 3, fz = c.z + Math.sin(fa) * (5 + row * 3.5) + Math.sin(fa + Math.PI / 2) * (col - 1.5) * 3; this.moveTo(u, fx, fz, dt, Math.hypot(fx - u.x, fz - u.z) > 6 ? 1.15 : .6); return; }
       case 'gather': case 'fish': {
-        if (u.carry >= 5) { if (this.moveTo(u, home.x, home.z, dt) || Math.hypot(u.x - home.x, u.z - home.z) < 12) { const k = u.state === 'fish' ? 1.3 : ({ herb: 1.3, omni: 1, carn: .6 }[G.players[S2.p].diet]); const y = u.carry * k * G.players[S2.p].mods.econ; q.food += y; u.carry = 0; this.fx.text(u.x, 3, u.z, '+' + Math.round(y), '#a6d96a', S2.p); } return; }
+        if (u.carry >= 6) { if (this.moveTo(u, home.x, home.z, dt) || Math.hypot(u.x - home.x, u.z - home.z) < 12) { const k = u.state === 'fish' ? 1.3 : ({ herb: 1.3, omni: 1.1, carn: .85 }[G.players[S2.p].diet]); const y = u.carry * k * G.players[S2.p].mods.econ; q.food += y; u.carry = 0; this.fx.text(u.x, 3, u.z, '+' + Math.round(y), '#a6d96a', S2.p); } return; }
         if (u.state === 'fish') { const f = u.spot; if (!f) { u.state = 'follow'; return; } if (Math.hypot(f.x - u.x, f.z - u.z) > 3) this.moveTo(u, f.x + Math.cos(u.wa) * 2, f.z + Math.sin(u.wa) * 2, dt); else { u.cr.update(dt, u.x, u.z, u.a, this.H); u.pick = (u.pick || 0) + dt; if (u.pick > .5 && f.stock >= 1) { u.pick = 0; f.stock--; u.carry++; } } return; }
         let b = u.target; if (!b || b.fruit < 1) { b = null; let bd = 1e9; const from = u.spot || u; for (const o of this.bushes) { if (o.fruit < 1) continue; const d = Math.hypot(o.x - from.x, o.z - from.z); if (d < bd && d < 80) { bd = d; b = o; } } u.target = b; }
         if (!b) { u.state = 'follow'; return; }

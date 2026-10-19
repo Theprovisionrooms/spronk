@@ -10,7 +10,7 @@
    across the sphere without turning (parallel transport), so the map never spins under you. */
 const PR = 100;
 const CIV_STYLES = { military: 'Militarist', trade: 'Merchant', culture: 'Zealot' };
-const CIV_COST = { invade: 40, trade: 70, fort: 40, gift: 50, peace: 100 };
+const CIV_COST = { invade: 60, trade: 70, fort: 40, gift: 50, peace: 100 };
 const CIV_NEED = { neutral: 100, city: 140, capital: 220 };
 const CIV_WONDERS = [
   { k: 'crater', name: 'The Crater Sea', icon: '◎', lore: 'A perfect round sea where something fell long ago.', bonus: '+1 spice a second, for good.', apply: (st, n) => { n.bonus.income += 1; } },
@@ -109,9 +109,9 @@ const CivStage = {
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTexture(), color: col3(hue, .9, .7), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })); glow.scale.setScalar(4); glow.position.z = -3.6; g.add(glow);
     return g;
   },
-  baseDef(c) { return (c.capital ? 160 : c.owner >= 0 ? 90 : 55) + c.fort * 40; },
+  baseDef(c) { return (c.capital ? 180 : c.owner >= 0 ? 110 : 80) + c.fort * 40; },
   need(c) { return c.owner < 0 ? CIV_NEED.neutral : c.capital ? CIV_NEED.capital : CIV_NEED.city; },
-  goalShare() { return G.mode === 1 ? .6 : G.accord ? .3 : .4; },
+  goalShare() { return G.mode === 1 ? .5 : G.accord ? .3 : .4; },
   onAccordChange() { for (const q of this.pl || []) toastP(q.p, `New goal: unite ${Math.round(this.goalShare() * 100)}% of the planet${G.accord ? ' (the accord lowers the bar)' : ''}.`); },
   surf(u, alt) { const h = this.hAt(u), el = h > this.sea ? (h - this.sea) * 26 : 0; return u.clone().multiplyScalar(PR + Math.max(el, .2) + alt); },
   orient(obj, u) { obj.quaternion.setFromUnitVectors(_UP, u); },
@@ -148,7 +148,7 @@ const CivStage = {
     if (o && !o.player && n.player && !o.war[n.p]) { o.war[n.p] = true; o.att[n.p] = Math.min(o.att[n.p], -40); toastP(n.p, `War with the ${o.name}. They will send armies at your cities until you make peace.`, 'warn'); }
     if (o && o.player && n.player && !this.pvp) { this.pvp = true; toastP(o.p, `P${n.p + 1} is invading your city ${c.name}!`, 'bad'); }
     if (o && o.player && !n.player) toastP(o.p, `The ${n.name} are marching on ${c.name}!`, 'bad');
-    this.spawnWave(p, from, c); if (n.player) { Sfx.click(n.p); toastP(n.p, `Your army marches on ${c.name}.`); }
+    this.spawnWave(p, from, c); if (n.player) { Sfx.battle(n.p); toastP(n.p, `Your army marches on ${c.name}.`); }
   },
   spawnWave(owner, from, to) {
     const n = this.nations[owner], m = this.mods(n), g = new THREE.Group(), mat = stdMat(col3(n.hue, .65, .5).getHex(), { roughness: .5 });
@@ -175,7 +175,7 @@ const CivStage = {
     this.dropRoutes(r => r.to === c || r.from === c);
     for (const w of this.waves) if (w.to === c && w.owner === by) w.done = true;
     const nb = this.nations[by]; this.fx.burst(...this.surf(c.u, 3).toArray(), hueCss(nb.hue), 30, 7, 1);
-    if (nb.player) { Sfx.good(nb.p); nb.stat[via]++; toastP(nb.p, `${c.name} joins you${via === 'mil' ? ' by force' : via === 'trade' ? ' through trade' : ' out of admiration'}.`, 'good'); }
+    if (nb.player) { Sfx.capture(nb.p); nb.stat[via]++; toastP(nb.p, `${c.name} joins you${via === 'mil' ? ' by force' : via === 'trade' ? ' through trade' : ' out of admiration'}.`, 'good'); }
     if (prev >= 0) {
       const pn = this.nations[prev]; if (pn.player) toastP(pn.p, `You lost ${c.name}.`, 'bad');
       if (!pn.player && via === 'mil' && nb.player) { pn.att[nb.p] -= 25; }
@@ -186,6 +186,7 @@ const CivStage = {
   onAction(p, act) {
     const q = this.pl[p]; if (!q) return; const c = this.near(q);
     if (act === 'menu') { this.openNation(p); return; }
+    if (act === 'a3') { Sfx.whoosh(p); return; }
     if (act === 'back') { q.compass = (q.compass + 1) % 3; toastP(p, `Compass: ${['the nearest city you could win', 'the nearest undiscovered wonder', 'your capital'][q.compass]}.`); Sfx.click(p); return; }
     if (act === 'a1') { if (!c) { toastP(p, 'Fly over a city first. Your compass points at the nearest one.'); return; } this.openCity(p, c); }
     else if (act === 'a2') { if (!c) { toastP(p, 'Fly over a city to send an army at it.'); return; } this.invade(p, c); }
@@ -256,7 +257,7 @@ const CivStage = {
     for (const w of this.waves) if ((w.hp <= 0 || w.done) && !w.gone) { w.gone = true; this.scene.remove(w.g); if (w.hp <= 0) this.fx.burst(...w.g.position.toArray(), hueCss(this.nations[w.owner].hue), 12, 5, .6); }
     this.waves = this.waves.filter(w => !w.gone);
     // loyalty fills: the city joins
-    for (const c of this.cities) for (const k in c.loy) { const id = +k, need = this.need(c); if (c.loy[k] >= need && c.owner !== id && this.nations[id].alive && this.canTake(id, c)) { const via = this.routes.some(r => r.owner === id && r.to === c) ? 'trade' : 'culture'; toastAll(`${c.name} ${via === 'trade' ? 'signs on with' : 'chooses to join'} the ${this.nations[id].name}.`); this.capture(c, id, via); break; } }
+    for (const c of this.cities) for (const k in c.loy) { const id = +k, need = this.need(c); if (c.loy[k] >= need && c.owner !== id && this.nations[id].alive && this.canTake(id, c)) { const via = this.routes.some(r => r.owner === id && r.to === c) ? 'trade' : 'culture'; for (const pn of Panes) if (!(this.nations[id].player && this.nations[id].p === pn.i)) pn.toast(`${c.name} ${via === 'trade' ? 'signs on with' : 'chooses to join'} the ${this.nations[id].name}.`); this.capture(c, id, via); break; } }
     for (const n of this.nations) if (!n.player && n.alive) { n.think -= dt; if (n.think <= 0) { n.think = rand(5, 8); this.ai(n); } }
     for (const q of this.pl) this.updShip(q, dt);
     this.updClouds(dt); this.fx.update(dt);
@@ -273,7 +274,7 @@ const CivStage = {
     const free = this.cities.filter(c => c.owner < 0).sort((a, b) => Math.min(...mine.map(m => m.u.angleTo(a.u))) - Math.min(...mine.map(m => m.u.angleTo(b.u))));
     const myWaves = this.waves.filter(w => w.owner === n.id).length;
     // at war with a player: armies at their nearest city
-    for (let p = 0; p < G.mode; p++) if (n.war[p] && n.spice >= CIV_COST.invade && myWaves < 2 && Math.random() < .6) { const tg = this.mine(p).sort((a, b) => Math.min(...mine.map(m => m.u.angleTo(a.u))) - Math.min(...mine.map(m => m.u.angleTo(b.u))))[0]; if (tg) { this.invade(n.id, tg, true); return; } }
+    for (let p = 0; p < G.mode; p++) if (n.war[p] && n.spice >= CIV_COST.invade && !this.waves.some(w => w.owner === n.id && w.to.owner === p) && Math.random() < .35) { const tg = this.mine(p).sort((a, b) => Math.min(...mine.map(m => m.u.angleTo(a.u))) - Math.min(...mine.map(m => m.u.angleTo(b.u))))[0]; if (tg) { this.invade(n.id, tg, true); return; } }
     if (n.style === 'military' && n.spice >= CIV_COST.invade && myWaves < 2 && free[0]) this.invade(n.id, free[0], true);
     else if (n.style === 'trade' && n.spice >= CIV_COST.trade && this.routes.filter(r => r.owner === n.id).length < 3) { const tg = free.find(c => !this.routes.some(r => r.owner === n.id && r.to === c)); if (tg) { n.spice -= CIV_COST.trade; this.addRoute(n.id, this.nearOwn(n.id, tg.u), tg); } }
     else if (n.style === 'culture' && n.spice >= 120 && free[0] && Math.random() < .3) this.invade(n.id, free[0], true);
@@ -295,7 +296,7 @@ const CivStage = {
     // inspiring: hold the key over a city
     const c = this.near(q), insp = held(q.p, 'a4') && !menu && c && this.canTake(q.p, c);
     q.inspiring = insp ? c : null;
-    if (insp) { const k = G.players[q.p].mods.social * (1 + n.bonus.inspire); c.loy[q.p] = (c.loy[q.p] || 0) + 9 * k * dt; if (Math.random() < dt * 8) this.fx.burst(...this.surf(c.u, 4).toArray(), hueCss(G.players[q.p].hue), 3, 3, .8); }
+    if (insp) { const k = G.players[q.p].mods.social * (1 + n.bonus.inspire); c.loy[q.p] = (c.loy[q.p] || 0) + 3 * k * dt; if (Math.random() < dt * 8) this.fx.burst(...this.surf(c.u, 4).toArray(), hueCss(G.players[q.p].hue), 3, 3, .8); }
     q.ring.visible = !!insp; if (insp) { const ph = (this.t * .9) % 1; q.ring.position.copy(this.surf(c.u, .5 + ph * 9)); this.orient(q.ring, c.u); q.ring.rotateX(-Math.PI / 2); q.ring.scale.setScalar(3 + ph * 6); q.ring.material.opacity = .7 * (1 - ph); }
   },
   updClouds(dt) {
@@ -341,5 +342,6 @@ const CivStage = {
       { act: 'a3', label: 'Boost' }, { act: 'menu', label: 'Nation' }, { act: 'back', label: 'Compass' }]);
     pane.prompt(!c ? '' : c.owner === i ? `${c.name} · your city · walls ${c.fort}/3` : can ? `${c.name} · loyalty to you ${Math.min(100, Math.round((c.loy[i] || 0) / this.need(c) * 100))}% · defences ${Math.round(c.def)}` : `${c.name} · ${this.why(i, c)}`);
   },
+  musicMood() { let m = 0; for (const q of this.pl) { if (this.waves.some(w => w.to.owner === q.p && w.u.angleTo(w.to.u) < .3)) m = 1; else if (this.nations.some(n => !n.player && n.alive && n.war[q.p])) m = Math.max(m, .45); if (q.inspiring) m = Math.max(m, .3); } return m; },
   exit() {},
 };

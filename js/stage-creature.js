@@ -3,7 +3,7 @@
 /* ============================== STAGE 2: CREATURE ============================== */
 const SOCIALS = [{ k: 'sing', act: 'a1', icon: 'sing', sym: '♪', col: '#5ce1e6' }, { k: 'dance', act: 'a2', icon: 'dance', sym: '≈', col: '#b48cff' }, { k: 'charm', act: 'a3', icon: 'charm', sym: '♥', col: '#ff8fb8' }, { k: 'pose', act: 'a4', icon: 'pose', sym: '★', col: '#f2b544' }];
 const COMBAT = [{ k: 'bite', cd: 1.1 }, { k: 'strike', cd: .9 }, { k: 'charge', cd: 5 }, { k: 'spit', cd: 2.6 }];
-const BRAIN = [0, 50, 120, 200, 290, 380];
+const BRAIN = [0, 60, 150, 260, 380, 500];
 const TEMPERS = { peaceful: 'Peaceful herd', skittish: 'Skittish', territorial: 'Territorial', aggressive: 'Pack hunters', nocturnal: 'Night hunters', giant: 'Gentle giants', ambusher: 'Ambushers', spitter: 'Spitters', rogue: 'Rogue', epic: 'Epic' };
 const HOSTILE_T = new Set(['aggressive', 'nocturnal', 'ambusher', 'rogue', 'epic', 'territorial', 'spitter']);
 const CreatureStage = {
@@ -91,11 +91,11 @@ const CreatureStage = {
     if (q.prog >= BRAIN[5] && !Flow.ready[q.p]) {
       const al = this.species.filter(s => s.allied[q.p]).length, ex = this.species.filter(s => s.extinct && s.kills[q.p] > 0).length, k = q.kills;
       const style = ex > al || (al === 0 && k > 8) ? 'aggr' : al > ex ? 'social' : 'mixed';
-      G.players[q.p].dna = Math.floor(q.dna * .5);
+      G.players[q.p].dna = Math.min(100, Math.floor(q.dna * .5));
       playerDone(q.p, style, [`Befriended ${al} species, drove ${ex} to extinction, ${k} kills.`, 'Your species gathers into its first tribe.']);
     }
   },
-  forceStyle(p) { const al = this.species.filter(s => s.allied[p]).length, ex = this.species.filter(s => s.extinct && s.kills[p] > 0).length; G.players[p].dna = Math.floor(this.pl[p].dna * .5); return ex > al ? 'aggr' : al > ex ? 'social' : 'mixed'; },
+  forceStyle(p) { const al = this.species.filter(s => s.allied[p]).length, ex = this.species.filter(s => s.extinct && s.kills[p] > 0).length; G.players[p].dna = Math.min(100, Math.floor(this.pl[p].dna * .5)); return ex > al ? 'aggr' : al > ex ? 'social' : 'mixed'; },
   summary(p) { const q = this.pl[p], al = this.species.filter(s => s.allied[p]).length, ex = this.species.filter(s => s.extinct && s.kills[p] > 0).length; return [`Befriended ${al} species, drove ${ex} to extinction, ${q.kills} kills, brain level ${this.brainLvl(q)}.`, 'Your species gathers into its first tribe.']; },
   evolveHint(p) { return `go home to your nest and press ${KEYLABEL[p].menu}`; },
   wonderReward(p, kind) {
@@ -145,7 +145,7 @@ const CreatureStage = {
     else { q.cds.spec = 6; q.act = 'roar'; q.actT = .6; q.cr.st.sing = true; this.roar(q); }
   },
   roar(q) {
-    Sfx.tone(120, .5, 'sawtooth', .04, .6, Sfx.pan(q.p)); this.fx.burst(q.x, q.cr.head().y, q.z, '#ffffff', 26, 12, .5); q.shake = .25;
+    Sfx.roar(q.p); this.fx.burst(q.x, q.cr.head().y, q.z, '#ffffff', 26, 12, .5); q.shake = .25;
     for (const e of this.ents) { if (e === q || !this.alive(e) || e.owner === q.p) continue; const d = Math.hypot(e.x - q.x, e.z - q.z); if (d > 12) continue; if (e.isPlayer && !canHarm()) continue; const kx = (e.x - q.x) / (d || 1), kz = (e.z - q.z) / (d || 1); e.vx += kx * 10 / (e.k || 1); e.vz += kz * 10 / (e.k || 1); if (!e.isPlayer) { if (e.k < 1.3 && e.sp.temper !== 'epic') { e.state = 'flee'; e.target = q; e.fleeT = 3; } else e.stun = .6; } }
   },
   greet(q) {
@@ -201,7 +201,7 @@ const CreatureStage = {
     t.owner = q.p; t.state = 'follow'; q.pack.push(t); Sfx.good(q.p); toastP(q.p, `A ${t.sp.name} joins your pack.`, 'good');
   },
   dig(q, b) {
-    b.dug[q.p] = true; const P = G.players[q.p], locked = Object.values(PARTS).filter(d => d.lock && !P.unlocked.includes(d.id) && !/^c_/.test(d.id));
+    b.dug[q.p] = true; Sfx.dig(q.p); const P = G.players[q.p], locked = Object.values(PARTS).filter(d => d.lock && !P.unlocked.includes(d.id) && !/^c_/.test(d.id));
     this.gain(q, 15, 20, '+15 brain'); this.fx.burst(b.x, this.T.h(b.x, b.z) + 1, b.z, '#ffd34d', 24, 6, .9, 6); Sfx.good(q.p);
     if (locked.length) { const d = pick(locked); P.unlocked.push(d.id); toastP(q.p, `Bones dug up. New part unlocked: ${d.name}. +20 DNA.`, 'good'); } else toastP(q.p, 'Bones dug up. +20 DNA.', 'good');
     if (b.dug.slice(0, G.mode).every(Boolean)) b.beam.visible = false;
@@ -413,7 +413,7 @@ const CreatureStage = {
       }
       case 'fight': { const t = n.target; if (!this.alive(t) || (t.isPlayer && t.inv > 0) || Math.hypot(t.x - n.x, t.z - n.z) > 65) { n.state = 'idle'; n.target = null; n.windup = null; break; } this.fightStep(n, t, dt); return; }
       case 'flee': { const t = n.target; n.fleeT = (n.fleeT || 4) - dt; if (n.fleeT <= 0) { n.state = 'idle'; break; } if (t && !t.dead) { tx = n.x + (n.x - t.x); tz = n.z + (n.z - t.z); } else { tx = sp.nest.x; tz = sp.nest.z; } spd = n.speed * 1.12; n.hp = Math.min(n.maxhp, n.hp + 2 * dt); break; }
-      case 'raid': { const q = this.pl[n.raiding]; if (!q) { n.state = 'idle'; break; } const d = Math.hypot(q.nest.x - n.x, q.nest.z - n.z); if (this.alive(q) && Math.hypot(q.x - n.x, q.z - n.z) < 18 && q.inv <= 0) { n.state = 'fight'; n.target = q; break; } if (d > 6) { tx = q.nest.x; tz = q.nest.z; spd = n.speed * .9; } else { n.lootT = (n.lootT || 0) + dt; n.cr.st.eat = 1; if (n.lootT > 6) { n.lootT = 0; const lost = Math.min(q.dna, 10); q.dna -= lost; if (lost) { toastP(q.p, `Raiders are stealing from your nest! -${lost} DNA`, 'bad'); this.fx.text(q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 3, q.nest.z, `-${lost} DNA`, '#ff4d6d', q.p); } n.raidLoots = (n.raidLoots || 0) + 1; if (n.raidLoots >= 4) { n.state = 'idle'; n.raiding = undefined; n.cr.st.eat = 0; } } } break; }
+      case 'raid': { const q = this.pl[n.raiding]; if (!q) { n.state = 'idle'; break; } const d = Math.hypot(q.nest.x - n.x, q.nest.z - n.z); if (this.alive(q) && Math.hypot(q.x - n.x, q.z - n.z) < 18 && q.inv <= 0) { n.state = 'fight'; n.target = q; break; } if (d > 6) { tx = q.nest.x; tz = q.nest.z; spd = n.speed * .9; } else { n.lootT = (n.lootT || 0) + dt; n.cr.st.eat = 1; if (n.lootT > 6) { n.lootT = 0; const lost = Math.min(q.dna, 10); q.dna -= lost; if (lost) { if (!q.raidToastT || this.t - q.raidToastT > 20) { q.raidToastT = this.t; toastP(q.p, `Raiders are stealing DNA from your nest! Get home and drive them off.`, 'bad'); } this.fx.text(q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 3, q.nest.z, `-${lost} DNA`, '#ff4d6d', q.p); } n.raidLoots = (n.raidLoots || 0) + 1; if (n.raidLoots >= 4) { n.state = 'idle'; n.raiding = undefined; n.cr.st.eat = 0; } } } break; }
       case 'lurk': { n.cr.st.sleep = true; n.cr.update(dt, n.x, n.z, n.a, this.ground); return; }
       case 'eat': { const m = n.target; if (!m || (m.life !== undefined && m.life <= 0) || (m.fruit !== undefined && m.fruit <= 0)) { n.state = 'idle'; break; } if (Math.hypot(m.x - n.x, m.z - n.z) > 2.5 + n.cr.B.len * n.k * .5) { tx = m.x; tz = m.z; spd = n.speed * .7; } else { n.eatT = (n.eatT || 0) + dt; n.cr.st.eat = 1; if (n.eatT > 2.5) { n.eatT = 0; n.cr.st.eat = 0; if (m.food !== undefined) { m.food--; if (m.food <= 0) m.life = 0; } else m.fruit--; n.hungerT = rand(50, 90); n.state = 'idle'; } } break; }
       case 'sleep': n.cr.st.sleep = true; n.cr.update(dt, n.x, n.z, n.a, this.ground); return;
@@ -608,6 +608,7 @@ const CreatureStage = {
     }
     if (!(q.dead > 0) && !(q.downed > 0)) pane.prompt(q.hunger < 20 ? (this.canEat(q, 'fruit') ? 'Starving: walk into fruit bushes to eat' : 'Starving: hunt, then walk over the meat') : q.duet ? '' : this.ents.some(e => !e.isPlayer && e.windup && e.target === q) ? 'Incoming attack: dodge!' : '');
   },
+  musicMood() { let m = 0; for (const q of this.pl) { if (q.combatT > 0) m = 1; else if (this.events.some(e => e.kind === 'raid' && e.p === q.p)) m = Math.max(m, .6); else if (this.day.isNight) m = Math.max(m, .2); } return m; },
   exit() { for (const e of this.ents) if (e.cr) e.cr.dispose(); for (const e of this.events) if (e.beam) this.scene.remove(e.beam); },
 };
 const _tv4 = new THREE.Vector3(), _kv4 = new THREE.Vector3();
