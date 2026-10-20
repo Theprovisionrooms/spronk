@@ -12,6 +12,12 @@ const PR = 100;
 const CIV_STYLES = { military: 'Militarist', trade: 'Merchant', culture: 'Zealot' };
 const CIV_COST = { invade: 60, trade: 70, fort: 40, gift: 50, peace: 100 };
 const CIV_NEED = { neutral: 100, city: 140, capital: 220 };
+/* each city you hold can specialise; the choice shows on the city as a coloured spire */
+const CIV_FOCUS = {
+  farms: { name: 'Farms', act: 'Turn it over to farming', col: 0x7fd36a, cost: 30, desc: '+1 spice a second from this city.' },
+  barracks: { name: 'Barracks', act: 'Garrison it', col: 0xff6a4a, cost: 30, desc: '+60 defences, and armies that set out from here are 40% stronger.' },
+  temple: { name: 'Temple', act: 'Raise a temple', col: 0xf2d06a, cost: 30, desc: 'Inspires every city nearby that you do not hold, a little at a time, without you being there.' },
+};
 const CIV_WONDERS = [
   { k: 'crater', name: 'The Crater Sea', icon: '◎', lore: 'A perfect round sea where something fell long ago.', bonus: '+1 spice a second, for good.', apply: (st, n) => { n.bonus.income += 1; } },
   { k: 'ruins', name: 'Ruins of the First City', icon: '⌂', lore: 'Older than any nation. Your people feel at home here.', bonus: 'Inspiring cities is 50% faster.', apply: (st, n) => { n.bonus.inspire += .5; } },
@@ -109,7 +115,7 @@ const CivStage = {
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTexture(), color: col3(hue, .9, .7), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })); glow.scale.setScalar(4); glow.position.z = -3.6; g.add(glow);
     return g;
   },
-  baseDef(c) { return (c.capital ? 180 : c.owner >= 0 ? 110 : 80) + c.fort * 40; },
+  baseDef(c) { return (c.capital ? 180 : c.owner >= 0 ? 110 : 80) + c.fort * 40 + (c.focus === 'barracks' ? 60 : 0); },
   need(c) { return c.owner < 0 ? CIV_NEED.neutral : c.capital ? CIV_NEED.capital : CIV_NEED.city; },
   goalShare() { return G.mode === 1 ? .5 : G.accord ? .3 : .4; },
   onAccordChange() { for (const q of this.pl || []) toastP(q.p, `New goal: unite ${Math.round(this.goalShare() * 100)}% of the planet${G.accord ? ' (the accord lowers the bar)' : ''}.`); },
@@ -133,7 +139,7 @@ const CivStage = {
   mine(id) { return this.cities.filter(c => c.owner === id); },
   allies(p) { return this.nations.filter(n => !n.player && n.alive && n.ally[p]); },
   held(p) { return this.mine(p).length + this.allies(p).reduce((a, n) => a + this.mine(n.id).length, 0); },
-  income(n) { const k = n.player ? G.players[n.p].mods.econ : 1; return (this.mine(n.id).length * 1.6 + this.routes.filter(r => r.owner === n.id).length * .6 + n.bonus.income) * k; },
+  income(n) { const k = n.player ? G.players[n.p].mods.econ : 1, farms = this.mine(n.id).filter(c => c.focus === 'farms').length; return (this.mine(n.id).length * 1.6 + farms + this.routes.filter(r => r.owner === n.id).length * .6 + n.bonus.income) * k; },
   mods(n) { return n.player ? G.players[n.p].mods : { dmg: 1, hp: 1, social: 1, econ: 1 }; },
   hostile(a, b) { if (a === b || a < 0 || b < 0) return false; const A = this.nations[a], B = this.nations[b]; if (A.player && B.player) return canHarm(); if (A.player) return B.war[A.p]; if (B.player) return A.war[B.p]; return false; },
   nearOwn(id, u) { return this.mine(id).sort((a, b) => a.u.angleTo(u) - b.u.angleTo(u))[0]; },
@@ -154,7 +160,7 @@ const CivStage = {
     const n = this.nations[owner], m = this.mods(n), g = new THREE.Group(), mat = stdMat(col3(n.hue, .65, .5).getHex(), { roughness: .5 });
     for (let k = 0; k < 3; k++) { const t = new THREE.Mesh(G_BOX(), mat); t.scale.set(1.1, .8, 1.6); t.position.set((k - 1) * 1.7, .5, (k % 2) * 1.2); g.add(t); }
     this.scene.add(g); const hp = 60 * m.hp;
-    this.waves.push({ owner, u: from.u.clone(), to, g, hp, maxhp: hp, str: 10 * m.dmg * (1 + n.bonus.army) });
+    this.waves.push({ owner, u: from.u.clone(), to, g, hp, maxhp: hp, str: 10 * m.dmg * (1 + n.bonus.army) * (from.focus === 'barracks' ? 1.4 : 1) * (n.player && hasFlag(G.players[n.p], 'venom') ? 1.15 : 1) });
   },
   openRoute(p, c) {
     const n = this.nations[p]; if (!this.canTake(p, c)) { toastP(p, this.why(p, c), 'bad'); return; }
@@ -169,9 +175,20 @@ const CivStage = {
     this.routeG.add(line); this.routeG.add(dot); this.routes.push({ owner, from, to, line, dot, pts, t: 0 });
   },
   dropRoutes(pred) { for (const r of this.routes.filter(pred)) { this.routeG.remove(r.line); this.routeG.remove(r.dot); r.line.geometry.dispose(); r.line.material.dispose(); } this.routes = this.routes.filter(r => !pred(r)); },
+  /* a city breaks away and becomes independent again */
+  freeCity(c) {
+    const prev = c.owner; if (prev < 0) return; c.owner = -1; c.loy = {}; if (c.focus) this.setFocus(c, null); c.maxdef = this.baseDef(c); c.def = c.maxdef * .5; this.paintCity(c);
+    this.dropRoutes(r => r.to === c || r.from === c); this.fx.burst(...this.surf(c.u, 3).toArray(), '#ffb347', 30, 7, 1);
+    if (!this.cities.some(x => x.owner === prev)) { const pn = this.nations[prev]; if (!pn.player) { pn.alive = false; toastAll(`The ${pn.name} are no more.`, 'warn'); } }
+  },
+  setFocus(c, k) {
+    c.focus = k; if (c.focusM) { c.g.remove(c.focusM); c.focusM = null; }
+    if (k) { const m = new THREE.Mesh(sharedGeo('focusSpire', () => new THREE.ConeGeometry(.9, 4, 6)), stdMat(CIV_FOCUS[k].col, { emissive: CIV_FOCUS[k].col, emissiveIntensity: .5 })); m.position.set(2.6, 2.2, -2.2); c.g.add(m); c.focusM = m; }
+    c.maxdef = this.baseDef(c); c.def = Math.min(c.def, c.maxdef);
+  },
   fortify(p, c) { const n = this.nations[p]; if (c.owner !== p || c.fort >= 3 || n.spice < CIV_COST.fort) return; n.spice -= CIV_COST.fort; c.fort++; c.maxdef = this.baseDef(c); c.def = Math.min(c.maxdef, c.def + 40); Sfx.good(p); },
   capture(c, by, via) {
-    const prev = c.owner; if (prev === by) return; c.owner = by; c.loy = {}; c.maxdef = this.baseDef(c); c.def = c.maxdef * .4; this.paintCity(c);
+    const prev = c.owner; if (prev === by) return; c.owner = by; c.loy = {}; if (c.focus) this.setFocus(c, null); c.maxdef = this.baseDef(c); c.def = c.maxdef * .4; this.paintCity(c);
     this.dropRoutes(r => r.to === c || r.from === c);
     for (const w of this.waves) if (w.to === c && w.owner === by) w.done = true;
     const nb = this.nations[by]; this.fx.burst(...this.surf(c.u, 3).toArray(), hueCss(nb.hue), 30, 7, 1);
@@ -199,6 +216,8 @@ const CivStage = {
       items: () => {
         if (c.owner === p) return [
           { label: c.fort >= 3 ? 'Walls at full strength' : 'Build walls', value: c.fort >= 3 ? '' : CIV_COST.fort, desc: '+40 defences against armies.', disabled: c.fort >= 3 || n.spice < CIV_COST.fort, onSelect: () => this.fortify(p, c) },
+          { head: true, label: `Focus · ${c.focus ? CIV_FOCUS[c.focus].name : 'none yet'}` },
+          ...Object.entries(CIV_FOCUS).map(([k, F]) => ({ label: c.focus === k ? `${F.name} (current)` : F.act, value: c.focus === k ? '' : F.cost, desc: F.desc, disabled: c.focus === k || n.spice < F.cost, onSelect: () => { if (c.focus === k || n.spice < F.cost) return; n.spice -= F.cost; this.setFocus(c, k); Sfx.good(p); } })),
           ...evolveItems(p), { label: 'Close', close: true, onSelect: () => {} }];
         const o = c.owner >= 0 ? this.nations[c.owner] : null, ok = this.canTake(p, c), route = this.routes.some(r => r.owner === p && r.to === c);
         return [
@@ -243,6 +262,8 @@ const CivStage = {
       const n = this.nations[r.owner], k = (n.player ? G.players[n.p].mods.econ : 1) * (1 + n.bonus.trade); r.to.loy[r.owner] = (r.to.loy[r.owner] || 0) + 2.4 * k * dt;
       r.t = (r.t + dt * .25) % 1; const f = r.t * (r.pts.length - 1), i = Math.floor(f); r.dot.position.lerpVectors(r.pts[i], r.pts[Math.min(r.pts.length - 1, i + 1)], f - i);
     }
+    // temples you build inspire the cities near them
+    for (const t of this.cities) if (t.focus === 'temple' && t.owner >= 0) { const n = this.nations[t.owner], k = n.player ? G.players[n.p].mods.social : 1; for (const c of this.cities) if (c !== t && this.canTake(t.owner, c) && c.u.angleTo(t.u) < .55) c.loy[t.owner] = (c.loy[t.owner] || 0) + .6 * k * dt; }
     // zealot nations inspire the cities around them without moving
     for (const n of this.nations) if (!n.player && n.alive && n.style === 'culture') for (const c of this.cities) if (c.owner < 0 && this.mine(n.id).some(m => m.u.angleTo(c.u) < .6)) c.loy[n.id] = (c.loy[n.id] || 0) + 1.1 * dt;
     // armies roll along great circles, then besiege
@@ -287,7 +308,7 @@ const CivStage = {
   updShip(q, dt) {
     const menu = Menus[q.p].isOpen, dir = menu ? { x: 0, z: 0, m: 0 } : dirOf(q.p), boost = held(q.p, 'a3') && !menu ? 2.1 : 1, n = this.nations[q.p];
     const right = _u1.crossVectors(q.h, q.u).normalize(), want = _u2.copy(q.h).multiplyScalar(-dir.z).addScaledVector(right, dir.x);
-    q.vel.lerp(want.multiplyScalar(.36 * boost * dir.m), Math.min(1, dt * 5));
+    q.vel.lerp(want.multiplyScalar(.36 * boost * dir.m * (G.players[q.p].mods.speed || 1)), Math.min(1, dt * 5));
     const sp = q.vel.length();
     if (sp > 1e-5) { const ax = _u3.crossVectors(q.u, q.vel).normalize(); _q1.setFromAxisAngle(ax, sp * dt); q.u.applyQuaternion(_q1).normalize(); q.h.applyQuaternion(_q1); q.vel.applyQuaternion(_q1); this.fixHeading(q); }
     const pos = this.surf(q.u, 13); q.ship.position.copy(pos); q.ship.up.copy(q.u);
@@ -320,7 +341,7 @@ const CivStage = {
     for (const c of this.cities) {
       if (c.u.angleTo(q.u) > 1.05 || !this.facing(i, c.wp)) continue; const s = project(_tv.copy(c.wp).addScaledVector(c.u, 8), i); if (!s) continue; const on = c.owner >= 0 ? this.nations[c.owner] : null;
       const mineLoy = c.owner !== i ? Math.min(1, (c.loy[i] || 0) / this.need(c)) : 0, siege = this.waves.some(w => w.to === c && w.u.angleTo(c.u) < .04);
-      pane.label(s.x, s.y, `<span style="color:${on ? hueCss(on.hue, 70, 74) : '#e2dcef'}">${esc(c.name)}${c.capital ? ' ★' : ''}</span><small>${on ? (on.id === i ? 'yours' : esc(on.name)) : 'independent'}${on && this.hostile(i, c.owner) ? ' · war' : ''}${on && !on.player && on.ally[i] ? ' · ally' : ''}${siege ? ' · <b style="color:#ff7a59">under siege</b>' : ''}</small>${mineLoy > 0 ? `<div class="relbar"><i style="width:${(mineLoy * 100).toFixed(0)}%"></i></div>` : ''}`, ctx === c ? 'sel' : '');
+      pane.label(s.x, s.y, `<span style="color:${on ? hueCss(on.hue, 70, 74) : '#e2dcef'}">${esc(c.name)}${c.capital ? ' ★' : ''}</span><small>${on ? (on.id === i ? 'yours' + (c.focus ? ' · ' + CIV_FOCUS[c.focus].name.toLowerCase() : '') : esc(on.name)) : 'independent'}${on && this.hostile(i, c.owner) ? ' · war' : ''}${on && !on.player && on.ally[i] ? ' · ally' : ''}${siege ? ' · <b style="color:#ff7a59">under siege</b>' : ''}</small>${mineLoy > 0 ? `<div class="relbar"><i style="width:${(mineLoy * 100).toFixed(0)}%"></i></div>` : ''}`, ctx === c ? 'sel' : '');
     }
     const t = this.compassTarget(q); if (t && !edgeMark(pane, i, t.wp.x, t.wp.y, t.wp.z, t.label, t.col, !this.facing(i, t.wp)) && t.u.angleTo(q.u) > .1) { const v = project(t.wp, i); if (v) pane.label(v.x, v.y + 28, `<small style="color:${t.col}">▲ compass</small>`); }
     Disc.labels(i, p => this.pl[p], s => s.y, null);
@@ -342,6 +363,30 @@ const CivStage = {
       { act: 'a3', label: 'Boost' }, { act: 'menu', label: 'Nation' }, { act: 'back', label: 'Compass' }]);
     pane.prompt(!c ? '' : c.owner === i ? `${c.name} · your city · walls ${c.fort}/3` : can ? `${c.name} · loyalty to you ${Math.min(100, Math.round((c.loy[i] || 0) / this.need(c) * 100))}% · defences ${Math.round(c.def)}` : `${c.name} · ${this.why(i, c)}`);
   },
+  memoryBonus(p) { this.nations[p].spice += 30; return '+30 spice.'; },
+  calm(p) { return !this.waves.some(w => w.to.owner === p && w.u.angleTo(w.to.u) < .1); },
+  chronicle: [
+    { id: 'volcano', title: 'The mountain wakes', when(p) { return this.mine(p).some(c => !c.capital); }, text(p) { const c = this.mine(p).filter(c => !c.capital).sort(() => Math.random() - .5)[0]; (this._vc = this._vc || [])[p] = c; return `The mountain above ${c.name} is smoking. The ground shakes every hour.`; },
+      choices: [
+        { label: 'Evacuate the city', desc: 'Everyone lives, but its defences fall to almost nothing for a while.', go(p) { const c = this._vc[p]; if (c && c.owner === p) c.def = c.maxdef * .1; return 'The city empties into the hills, then slowly comes home.'; } },
+        { label: 'Trust the mountain', desc: 'Half the time the ash makes the fields rich (+90 spice). Half the time the city is lost.', go(p) { const c = this._vc[p]; if (!c || c.owner !== p) return ''; if (Math.random() < .5) { this.nations[p].spice += 90; return 'The ash settles on the fields. +90 spice.'; } this.freeCity(c); return `${c.name} is buried. Survivors rebuild it as an independent city.`; } }] },
+    { id: 'plague', title: 'A plague on the roads', text: 'A sickness is travelling with the caravans from city to city.',
+      choices: [
+        { label: 'Close the roads', desc: 'Your trade routes stop for good. Your cities stay healthy.', go(p) { this.dropRoutes(r => r.owner === p); return 'The caravans stop.'; } },
+        { label: 'Keep trading', desc: 'Every city you hold loses half its defences while it recovers.', go(p) { for (const c of this.mine(p)) c.def *= .5; return 'The sickness runs its course.'; } }] },
+    { id: 'signal', title: 'A voice from the stars', text: 'Your radio towers have picked up a signal from beyond the sky. It repeats every few hours, patient as a heartbeat.',
+      choices: [
+        { label: 'Answer it', desc: 'The empires of the galaxy will know your name before you arrive: every one starts friendlier in the space stage.', go(p) { G.players[p].lore = { ...(G.players[p].lore || {}), answered: true }; return 'You send a reply into the dark. Someone, somewhere, will hear it.'; } },
+        { label: 'Stay quiet', desc: '+60 spice from the defence budget you save.', go(p) { this.nations[p].spice += 60; return '+60 spice.'; } }] },
+    { id: 'inventor', title: 'A great inventor', text: 'A brilliant engineer asks for funding. She can build one thing well.',
+      choices: [
+        { label: 'Fund the rocket', desc: '80 spice. Your first starship launches with better engines.', ok(p) { return this.nations[p].spice >= 80; }, go(p) { this.nations[p].spice -= 80; G.players[p].lore = { ...(G.players[p].lore || {}), rocket: true }; return 'The test flights go well. Space will be closer than you think.'; } },
+        { label: 'Fund the cannon', desc: '80 spice. Your armies are 25% stronger for the rest of this age.', ok(p) { return this.nations[p].spice >= 80; }, go(p) { this.nations[p].spice -= 80; this.nations[p].bonus.army += .25; return 'Your armies roll out with new guns.'; } }] },
+    { id: 'refugees', title: 'Refugees at the border', when(p) { return this.nations.some(n => !n.player && n.alive); }, text(p) { const o = this.nations.filter(n => !n.player && n.alive).sort(() => Math.random() - .5)[0]; (this._rf = this._rf || [])[p] = o; return `Thousands of people are fleeing the ${o.name} and asking to cross into your land.`; },
+      choices: [
+        { label: 'Take them in', desc: 'They bring stories of you home: +40 loyalty in their nearest city. Their leaders resent it.', go(p) { const o = this._rf[p]; if (!o) return ''; const c = this.mine(o.id).sort((a, b) => a.u.angleTo(this.pl[p].u) - b.u.angleTo(this.pl[p].u))[0]; if (c) c.loy[p] = (c.loy[p] || 0) + 40; o.att[p] -= 12; return c ? `${c.name} thinks better of you now.` : 'They settle in quietly.'; } },
+        { label: 'Send them back', desc: 'The ' + 'nation they fled likes you more: +15 attitude.', go(p) { const o = this._rf[p]; if (o) o.att[p] = Math.min(100, o.att[p] + 15); return 'The border stays shut.'; } }] },
+  ],
   musicMood() { let m = 0; for (const q of this.pl) { if (this.waves.some(w => w.to.owner === q.p && w.u.angleTo(w.to.u) < .3)) m = 1; else if (this.nations.some(n => !n.player && n.alive && n.war[q.p])) m = Math.max(m, .45); if (q.inspiring) m = Math.max(m, .3); } return m; },
   exit() {},
 };

@@ -145,15 +145,20 @@ const isExtra = l => !!(l.shared || l.first || l.wander);
 const STYLE_WORD = { aggr: 'Predatory', social: 'Peaceful', mixed: 'Adaptive' };
 const DIET_WORD = { carn: 'carnivore', herb: 'herbivore', omni: 'omnivore' };
 function newPlayer(i, name, hue) {
-  return { i, name, hue, hue2: (hue + 150) % 360, diet: 'omni', legacies: [], mods: { dmg: 1, hp: 1, social: 1, econ: 1 }, cell: null, body: null, unlocked: [], journal: [], score: 0 };
+  return { i, name, hue, hue2: (hue + 150) % 360, diet: 'omni', legacies: [], mods: { dmg: 1, hp: 1, social: 1, econ: 1, speed: 1 }, cell: null, body: null, unlocked: [], journal: [], genes: [], chronicle: [], score: 0 };
 }
-function recalcMods(P) { P.mods = { dmg: 1, hp: 1, social: 1, econ: 1 }; for (const l of P.legacies) { const m = l.shared ? SHARED.mods : l.wander ? WANDER_MODS : l.first ? {} : LEGACY[l.stage][l.style].mods; for (const k in m) P.mods[k] *= m[k]; } }
+function recalcMods(P) {
+  P.mods = { dmg: 1, hp: 1, social: 1, econ: 1, speed: 1 }; P.genes = P.genes || []; P.chronicle = P.chronicle || [];
+  for (const l of P.legacies) { const m = l.shared ? SHARED.mods : l.wander ? WANDER_MODS : l.first ? {} : LEGACY[l.stage][l.style].mods; for (const k in m) P.mods[k] *= m[k]; }
+  /* genes stack on top of legacies; GENES lives in genome.js, which loads later but before anything calls this */
+  if (typeof GENES !== 'undefined') for (const g of P.genes) { const m = GENES[g] && GENES[g].mods; if (m) for (const k in m) P.mods[k] = (P.mods[k] || 1) * m[k]; }
+}
 function addLegacy(P, stage, style) { P.legacies = P.legacies.filter(l => !(l.stage === stage && !isExtra(l))); const L = LEGACY[stage][style]; P.legacies.push({ stage, style, title: L.title, desc: L.desc }); recalcMods(P); }
 function styleCount(P, s) { return P.legacies.filter(l => l.style === s && !isExtra(l)).length; }
 function modsHTML(P) {
   const m = P.mods, out = [];
   const f = (k, n) => { if (Math.abs(m[k] - 1) > .001) out.push(`<span>${n} ×${m[k].toFixed(2)}</span>`); };
-  f('dmg', 'Damage'); f('hp', 'Health'); f('social', 'Social'); f('econ', 'Income');
+  f('dmg', 'Damage'); f('hp', 'Health'); f('social', 'Social'); f('econ', 'Income'); f('speed', 'Speed');
   if (P.cell) out.push(`<span>${DIET_WORD[P.diet]}</span>`);
   return `<div class="mods">${out.join('') || '<span>No inherited traits yet</span>'}</div>`;
 }

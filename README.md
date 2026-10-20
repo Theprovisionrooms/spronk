@@ -13,6 +13,7 @@ Static site with no build step. Cloudflare Pages serves the repo root as it is (
 | js/audio.js | Synthesised sound effects, ambience and generative music for each stage |
 | js/ui.js | Player HUD panes, key-driven menus, the shared modal |
 | js/engine.js | Graphics tiers, renderer, split screen, stage flow, discoveries, post-processing |
+| js/genome.js | Genes and mutation drafts, the decision cards, the chronicle of story events |
 | js/bodies.js | Mouldable bodies: parts, baking, the animated creature |
 | js/world.js | Terrain, sky, day and night, water, scenery, wonder landmarks |
 | js/editor.js | The cell and creature editor |
@@ -50,6 +51,20 @@ Creature: evolve from your nest. Golden beacons mark wonders worth the walk.
 Tribe: evolve from your village menu.
 Civilization: fly over the planet, up is always up the screen. Over a city, move 2 sends an army, hold move 4 to inspire it, move 1 opens it to trade or talk. Your compass points at the next city, wonder or home.
 Space: fly freely, hold move 3 to boost. At a star, move 1 opens the system. Collect Relics of the First Ones from ruins and empires to open the galactic core.
+
+## Systems that run through every stage
+**Genes.** At key moments you pick one mutation from a draft of three: as a cell grows, when a clutch of eggs hatches, when you reach a far wonder, when you catalogue enough alien life. Genes stack and stay with your species to the end. Tolerance genes open the world: Antifreeze Blood lets a creature climb the frozen peaks, keeps a tribe alive through winter and lets a spacefaring people settle ice worlds. Heat Scales let a cell feed at the vents, a creature cross the sulphur fields and a starfaring people live on volcanic worlds.
+**The chronicle.** A few times each stage something happens: a virus at the membrane, a storm, a sickness in the huts, a signal from the stars, a distress call. Each is a choice, and some echo forward: answer the signal as a civilization and the empires of the galaxy already know you.
+Decisions open in your side menu when you are not in danger. Close one and it waits at the top of your main menu.
+
+## What each stage adds
+| Stage | New mechanics |
+|---|---|
+| Cell | Mutation drafts at 25%, 50% and 75% growth. Engulf any cell under half your size; some survive inside you and become Mitochondria, Chloroplasts or Glow Bodies. Heat Scales turn the vents into food. |
+| Creature | Frozen highlands, a sulphur field and a toxic marsh that hurt you without the right gene, each hiding a wonder and a bone pile. Lay eggs at your nest and guard them from thieves; every clutch that hatches adds young to your pack and passes on a mutation you choose. |
+| Tribe | Seasons. Autumn harvests are richer, winter stops the fruit and fish while your people eat from your stores. Build a pen and tame wild animals to feed you all year. |
+| Civilization | Give each city a focus: farms for spice, barracks for stronger armies and walls, a temple that wins over the cities around it. Story choices here can carry into space. |
+| Space | Survey alien life at every star; deeper life needs a better scanner, and every four species offer a mutation. Settle harsh, ice and volcanic worlds with your tolerance genes, or terraform them. Unstable blue stars go supernova: evacuate, keep clear, then harvest the remnant. |
 
 ## Two players
 Compete with your rival, or form an accord to share allies, revive each other and land team combos.

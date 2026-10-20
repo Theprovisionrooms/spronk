@@ -18,7 +18,12 @@ const CreatureStage = {
     const nests = G.mode === 2 ? [{ x: -30, z: 20 }, { x: 30, z: 20 }] : [{ x: 0, z: 20 }];
     const base = r() * TAU; this.spots = Array.from({ length: 9 }, (_, i) => { const a = base + i * TAU / 9, d = 115 + r() * 95; return { x: Math.cos(a) * d, z: Math.sin(a) * d }; });
     this.wonders = wonderSites(r, 6, ['arch', 'spire', 'ribs', 'skytree', 'floaters', 'springs', 'shrooms'], 150, 228, [...nests.map(n => ({ ...n, r: 20 })), ...this.spots.map(n => ({ ...n, r: 14 }))]);
-    this.T = buildTerrain(sc, seed, { size: 640, seg: 170, water: 0, flat: [...nests.map(n => ({ ...n, r: 14, h: 3 })), ...this.spots.map(n => ({ ...n, r: 10, h: 4 })), ...this.wonders.map(n => ({ ...n, r: 17, h: 4.5 }))], trees: 380, palette: this.pal });
+    /* biome zones: a sulphur field and a toxic marsh you need the right gene to cross, plus the cold highlands found after the terrain is built */
+    this.zones = [];
+    const avoid = [...nests.map(n => ({ ...n, r: 70 })), ...this.spots.map(n => ({ ...n, r: 58 })), ...this.wonders.map(n => ({ ...n, r: 50 }))];
+    for (const kind of ['heat', 'toxin']) for (let k = 0; k < 400; k++) { const a = r() * TAU, d = 120 + r() * 105, x = Math.cos(a) * d, z = Math.sin(a) * d; if (avoid.some(o => Math.hypot(o.x - x, o.z - z) < o.r) || this.zones.some(o => Math.hypot(o.x - x, o.z - z) < 150)) continue; this.zones.push({ kind, x, z, r: kind === 'heat' ? 34 : 40 }); break; }
+    this.T = buildTerrain(sc, seed, { size: 640, seg: 170, water: 0, flat: [...nests.map(n => ({ ...n, r: 14, h: 3 })), ...this.spots.map(n => ({ ...n, r: 10, h: 4 })), ...this.wonders.map(n => ({ ...n, r: 17, h: 4.5 })), ...this.zones.map(z => ({ x: z.x, z: z.z, r: 12, h: z.kind === 'toxin' ? 1.5 : 5 }))], trees: 380, palette: this.pal });
+    this.buildZones(r);
     this.day = new DayNight(sc, this.sky, this.sun, this.hemi, 320, this.pal); this.fx = new FX3(sc, .7); this.ground = (x, z) => this.T.ground(x, z);
     this.wfx = new WorldFX(sc, this.T, this.pal, this.sun, this.day);
     for (const w of this.wonders) { const K = WONDER_KINDS[w.kind], lm = makeLandmark(w.kind, this.pal, r), y = this.T.h(w.x, w.z); lm.g.position.set(w.x, y, w.z); lm.g.rotation.y = r() * TAU; sc.add(lm.g); Disc.add({ x: w.x, z: w.z, y, r: 22, name: K.name, lore: K.lore, icon: K.icon, beacon: lm.beacon, spin: lm.spin, kind: w.kind, reward: p => this.wonderReward(p, w.kind) }); }
@@ -26,11 +31,8 @@ const CreatureStage = {
     const bushGeo = sharedGeo('bush', () => new THREE.IcosahedronGeometry(1.6, 1)), fruitM = stdMat(0xff5f9e, { emissive: 0x501030, roughness: .4 }), leafM = swayMaterial(litMat({ color: col3(this.pal.trees[0], .45, .32), flatShading: true }), .05, 1.6);
     for (let k = 0; k < 900 && this.bushes.length < 80; k++) { const x = (r() * 2 - 1) * 245, z = (r() * 2 - 1) * 245; if (this.T.isWater(x, z) || this.T.slopeAt(x, z) > .5) continue; const g = new THREE.Group(); g.position.set(x, this.T.h(x, z) + 1, z); const m = new THREE.Mesh(bushGeo, leafM); m.castShadow = true; g.add(m); const fr = []; for (let f = 0; f < 4; f++) { const fm = new THREE.Mesh(sharedGeo('fruit', () => new THREE.SphereGeometry(1, 8, 6)), fruitM); fm.scale.setScalar(.38); fm.position.set(Math.cos(f * 1.6) * 1.35, .4 + (f % 2) * .5, Math.sin(f * 1.6) * 1.35); g.add(fm); fr.push(fm); } sc.add(g); this.bushes.push({ x, z, fruit: 3, regen: 0, fr }); }
     const boneM = stdMat(0xeee4cc, { roughness: .6 });
-    for (let k = 0; k < 400 && this.bones.length < 10; k++) { const x = (r() * 2 - 1) * 255, z = (r() * 2 - 1) * 255; if (this.T.isWater(x, z) || Math.hypot(x, z) < 45 || this.bones.some(b => Math.hypot(b.x - x, b.z - z) < 55)) continue; const g = new THREE.Group(); g.position.set(x, this.T.h(x, z), z);
-      for (let i = 0; i < 7; i++) { const m = new THREE.Mesh(sharedGeo('bcyl', () => new THREE.CylinderGeometry(1, 1, 1, 6)), boneM); m.scale.set(.22, 2 - i * .12, .22); m.position.set(i * .6 - 1.8, .4, Math.sin(i) * .3); m.rotation.set(Math.PI / 2 + .3, 0, i * .25); g.add(m); }
-      const sk = new THREE.Mesh(sharedGeo('fruit', () => new THREE.SphereGeometry(1, 8, 6)), boneM); sk.scale.set(.9, .65, .75); sk.position.set(-2.6, .5, 0); g.add(sk);
-      const beam = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 26, 8, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: .16, depthWrite: false, blending: THREE.AdditiveBlending })); beam.position.y = 13; g.add(beam);
-      sc.add(g); this.bones.push({ x, z, dug: [false, false], g, beam }); }
+    for (let k = 0; k < 400 && this.bones.length < 10; k++) { const x = (r() * 2 - 1) * 255, z = (r() * 2 - 1) * 255; if (this.T.isWater(x, z) || Math.hypot(x, z) < 45 || this.bones.some(b => Math.hypot(b.x - x, b.z - z) < 55) || this.zoneAt(x, z)) continue; this.addBones(x, z, boneM); }
+    for (const zn of this.zones) { const a = r() * TAU; this.addBones(zn.x + Math.cos(a) * zn.r * .55, zn.z + Math.sin(a) * zn.r * .55, boneM, zn.kind); }
     // the wildlife: all built from the same mouldable bodies
     const plan = [['herb', 'peaceful', [1, 1.3], 6], ['herb', 'skittish', [.65, .8], 5], ['carn', 'aggressive', [.9, 1.1], 4], ['omni', 'territorial', [1.2, 1.5], 4], ['carn', 'nocturnal', [1, 1.2], 3], ['herb', 'giant', [2.1, 2.5], 2], ['omni', 'peaceful', [.9, 1.1], 5], ['carn', 'ambusher', [.9, 1.1], 3], ['omni', 'spitter', [.8, 1], 4]];
     plan.forEach(([diet, temper, ks, count], i) => {
@@ -45,13 +47,46 @@ const CreatureStage = {
     this.pl = [];
     for (let p = 0; p < G.mode; p++) {
       const P = G.players[p]; if (!P.body || P.body.kind !== 'creature') P.body = starterCreature(P);
-      const n = nests[p]; this.addNest(n.x, n.z, P.hue, true);
-      const q = { p, isPlayer: true, x: n.x, z: n.z - 13, a: -Math.PI / 2, camYaw: -Math.PI / 2, vx: 0, vz: 0, lift: 0, vy: 0, hp: 1, maxhp: 1, hunger: 85, stam: 3, dead: 0, downed: 0, revT: 0, inv: 0, cds: {}, target: null, duet: null, pack: [], nest: n, dna: 30 + (P.dna || 0), prog: 0, kills: 0, act: null, actT: 0, glide: false, sprintT: 0, shake: 0, combo: { n: 0, t: 0 }, dodge: 0, pending: null, combatT: 0, lastHitOn: null, lastHitT: 0 };
+      const n = nests[p], eggMeshes = this.addNest(n.x, n.z, P.hue, true); for (const e of eggMeshes) e.visible = false;
+      const q = { p, isPlayer: true, x: n.x, z: n.z - 13, a: -Math.PI / 2, camYaw: -Math.PI / 2, vx: 0, vz: 0, lift: 0, vy: 0, hp: 1, maxhp: 1, hunger: 85, stam: 3, dead: 0, downed: 0, revT: 0, inv: 0, cds: {}, target: null, duet: null, pack: [], nest: n, dna: 30 + (P.dna || 0), prog: 0, kills: 0, act: null, actT: 0, glide: false, sprintT: 0, shake: 0, combo: { n: 0, t: 0 }, dodge: 0, pending: null, combatT: 0, lastHitOn: null, lastHitT: 0, eggMeshes, clutch: null, clutches: 0, hatched: 0 };
       P.dna = 0;
       this.pl.push(q); this.ents.push(q); this.rebuildPlayer(q); q.hp = q.maxhp;
-      Panes[p].build({ eyebrow: 'Stage 2 · Creature', title: P.name, meters: [{ id: 'hp', label: 'Health', color: 'var(--membrane)' }, { id: 'hu', label: 'Hunger', color: 'var(--ochre)' }, { id: 'br', label: 'Brain', color: 'var(--violet)' }], stats: [{ id: 'dna', label: 'DNA' }, { id: 'pack', label: 'Pack' }, { id: 'won', label: 'Wonders' }, { id: 'time', label: 'Time' }] });
+      Panes[p].build({ eyebrow: 'Stage 2 · Creature', title: P.name, meters: [{ id: 'hp', label: 'Health', color: 'var(--membrane)' }, { id: 'hu', label: 'Hunger', color: 'var(--ochre)' }, { id: 'br', label: 'Brain', color: 'var(--violet)' }], stats: [{ id: 'dna', label: 'DNA' }, { id: 'pack', label: 'Pack' }, { id: 'won', label: 'Wonders' }, { id: 'time', label: 'Time' }, { id: 'eggs', label: 'Eggs' }, { id: 'gen', label: 'Genes' }] });
       const L = KEYLABEL[p]; toastP(p, `Move with ${G.mode === 2 ? L.move : 'the arrows'}. ${L.a1} attack, ${L.a2} special, ${L.a3} greet, ${L.a4} jump or dodge, ${L.menu} interact, ${L.back} next target. Befriend, hunt or explore to grow your brain: golden beacons mark wonders worth the walk.`);
+      toastP(p, 'Lay eggs at your nest and guard them: each clutch that hatches passes a new mutation through your species. Frozen peaks, sulphur fields and toxic marsh hurt you until you evolve the right gene.');
     }
+  },
+  addBones(x, z, boneM, zone) {
+    const g = new THREE.Group(); g.position.set(x, this.T.h(x, z), z);
+    for (let i = 0; i < 7; i++) { const m = new THREE.Mesh(sharedGeo('bcyl', () => new THREE.CylinderGeometry(1, 1, 1, 6)), boneM); m.scale.set(.22, 2 - i * .12, .22); m.position.set(i * .6 - 1.8, .4, Math.sin(i) * .3); m.rotation.set(Math.PI / 2 + .3, 0, i * .25); g.add(m); }
+    const sk = new THREE.Mesh(sharedGeo('fruit', () => new THREE.SphereGeometry(1, 8, 6)), boneM); sk.scale.set(.9, .65, .75); sk.position.set(-2.6, .5, 0); g.add(sk);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, 26, 8, 1, true), new THREE.MeshBasicMaterial({ color: zone ? 0xb8f0ff : 0xffd34d, transparent: true, opacity: .16, depthWrite: false, blending: THREE.AdditiveBlending })); beam.position.y = 13; g.add(beam);
+    this.scene.add(g); this.bones.push({ x, z, dug: [false, false], g, beam, zone });
+  },
+  /* ---------- biome zones ---------- */
+  buildZones(r) {
+    /* the cold highlands: the top slice of the land, wherever the mountains happen to be */
+    /* never right next to a nest: everyone starts somewhere they can live */
+    this.homeSafe = (G.mode === 2 ? [{ x: -30, z: 20 }, { x: 30, z: 20 }] : [{ x: 0, z: 20 }]);
+    const nearHome = (x, z, d) => this.homeSafe.some(n => Math.hypot(n.x - x, n.z - z) < d);
+    const hs = []; let top = null; for (let x = -240; x <= 240; x += 8) for (let z = -240; z <= 240; z += 8) { if (nearHome(x, z, 80)) continue; const h = this.T.h(x, z); hs.push(h); if ((!top || h > top.h) && !this.zones.some(o => Math.hypot(o.x - x, o.z - z) < o.r + 30)) top = { x, z, h }; }
+    hs.sort((a, b) => a - b); this.coldH = Math.max(7, hs[Math.floor(hs.length * .88)]);
+    if (top && top.h > this.coldH + 1) this.zones.push({ kind: 'cold', x: top.x, z: top.z, r: 0, peak: true });
+    const ZC = { heat: [.93, .78, .42], toxin: [.33, .4, .22] };
+    tintTerrain(this.T, (x, y, z) => {
+      if (y > this.coldH - 2 && !nearHome(x, z, 70)) return [.92, .95, 1, clamp((y - this.coldH + 2) / 4, 0, .92) * clamp((Math.min(...this.homeSafe.map(n => Math.hypot(n.x - x, n.z - z))) - 70) / 15, 0, 1)];
+      for (const zn of this.zones) { if (zn.kind === 'cold') continue; const d = Math.hypot(x - zn.x, z - zn.z); if (d < zn.r * 1.15) { const c = ZC[zn.kind], n = Math.sin(x * .7) * Math.cos(z * .6) * .08; return [c[0] + n, c[1] + n, c[2] + n, clamp((zn.r * 1.15 - d) / (zn.r * .35), 0, .9)]; } }
+      return null;
+    });
+    const ZW = { cold: { kind: 'spire', name: 'The Frozen Crown', lore: 'Ice older than any living thing, ringing in the wind.', icon: '❄' }, heat: { kind: 'springs', name: 'The Sulphur Eye', lore: 'A boiling pool the colour of the sun, where strange life thrives.', icon: '♨' }, toxin: { kind: 'shrooms', name: 'The Rot Garden', lore: 'Giant fungi glowing over a marsh that kills anything unready for it.', icon: '☣' } };
+    for (const zn of this.zones) {
+      const W = ZW[zn.kind], lm = makeLandmark(W.kind, this.pal, r), y = this.T.h(zn.x, zn.z); lm.g.position.set(zn.x, y, zn.z); this.scene.add(lm.g);
+      Disc.add({ x: zn.x, z: zn.z, y, r: 18, name: W.name, lore: W.lore, icon: W.icon, beacon: lm.beacon, spin: lm.spin, zone: zn.kind, reward: p => { const q = this.pl[p]; this.gain(q, 40, 25, '+40 brain'); offerGenes(p, `Reaching ${W.name} changed you. Pick a mutation.`); return '+40 brain, +25 DNA, and a mutation to choose.'; } });
+    }
+  },
+  zoneAt(x, z) {
+    for (const zn of this.zones || []) if (zn.kind !== 'cold' && Math.hypot(x - zn.x, z - zn.z) < zn.r) return zn.kind;
+    return this.coldH !== undefined && this.T && this.T.h(x, z) > this.coldH && !this.homeSafe.some(n => Math.hypot(n.x - x, n.z - z) < 75) ? 'cold' : null;
   },
   addSpecies(o, r) {
     const B = bakeBody(o.body, { res: .085 }), ab = abilities(o.body), favs = SOCIALS.map(s => s.k).sort(() => r() - .5).slice(0, 2);
@@ -64,7 +99,7 @@ const CreatureStage = {
   addNest(x, z, hue, big) {
     const g = new THREE.Group(), y = this.T.ground(x, z); g.position.set(x, y, z); const m = stdMat(col3(hue, .3, .35).getHex());
     const n = big ? 22 : 14; for (let k = 0; k < n; k++) { const st = new THREE.Mesh(sharedGeo('bcyl', () => new THREE.CylinderGeometry(1, 1, 1, 6)), m); const a = k / n * TAU; st.scale.set(.07, 1.5, .07); st.position.set(Math.cos(a) * (big ? 2.2 : 1.8), .12 + (k % 2) * .1, Math.sin(a) * (big ? 2.2 : 1.8)); st.rotation.set(Math.PI / 2, 0, a + .9); g.add(st); }
-    const eggs = []; for (let k = 0; k < 3; k++) { const e = new THREE.Mesh(sharedGeo('fruit', () => new THREE.SphereGeometry(1, 8, 6)), stdMat(col3(hue, .45, .82).getHex())); e.scale.set(.28, .36, .28); e.position.set(Math.cos(k * 2) * .5, .3, Math.sin(k * 2) * .5); g.add(e); eggs.push(e); }
+    const eggs = []; for (let k = 0; k < (big ? 4 : 3); k++) { const e = new THREE.Mesh(sharedGeo('fruit', () => new THREE.SphereGeometry(1, 8, 6)), stdMat(col3(hue, .45, .82).getHex())); e.scale.set(.28, .36, .28); e.position.set(Math.cos(k * 2) * .5, .3, Math.sin(k * 2) * .5); g.add(e); eggs.push(e); }
     if (big) { const ring = new THREE.Mesh(new THREE.RingGeometry(7.5, 8, 48), new THREE.MeshBasicMaterial({ color: col3(hue, .8, .6), transparent: true, opacity: .5, side: THREE.DoubleSide })); ring.rotation.x = -Math.PI / 2; ring.position.y = .15; g.add(ring); }
     this.scene.add(g); return eggs;
   },
@@ -79,7 +114,7 @@ const CreatureStage = {
     const P = G.players[q.p]; if (q.cr) { q.cr.dispose(); q.B.geometry.dispose(); }
     q.B = bakeBody(P.body); q.ab = abilities(P.body); q.cr = new Creature(q.B, 1); this.scene.add(q.cr.group); q.cr.update(0, q.x, q.z, q.a, this.ground);
     const f = q.maxhp > 1 ? q.hp / q.maxhp : 1; q.maxhp = this.hpFor(q.ab, 1, P.mods); q.hp = q.maxhp * f;
-    q.speed = (6 + q.ab.A.speed * 1.5) * (q.ab.legs ? 1 : .6); q.k = 1;
+    q.speed = (6 + q.ab.A.speed * 1.5) * (q.ab.legs ? 1 : .6) * (P.mods.speed || 1); q.k = 1;
   },
   /* ---------- progress ---------- */
   brainLvl(q) { let l = 1; for (let i = 1; i < BRAIN.length; i++) if (q.prog >= BRAIN[i]) l = i + 1; return Math.min(5, l); },
@@ -182,6 +217,8 @@ const CreatureStage = {
     Menus[p].open({ eyebrow: 'Your nest', title: P.name, sub: () => `${q.dna} DNA · brain level ${this.brainLvl(q)} · pack ${q.pack.length}/${this.packMax(q)}`, live: true, items: () => [
       ...evolveItems(p), { head: true, label: 'Nest' },
       { label: 'Change your body in the editor', desc: 'Reshape your body and add parts. The game pauses while you edit.', onSelect: () => { Menus[p].close(); this.openEditor(p); } },
+      q.clutch ? { label: `Eggs in the nest: ${q.clutch.eggs}`, value: `${Math.ceil(q.clutch.t)}s`, desc: 'Stay close or come back to drive off egg thieves. When they hatch, the young join your pack and you choose the mutation they carry.' }
+        : { label: 'Lay a clutch of eggs', value: '15 DNA', desc: q.clutches >= 3 ? 'Your species has laid all it can this age.' : q.hunger < 50 ? 'You need to be well fed (over half hunger) to lay.' : `${2 + (hasFlag(P, 'clutch') ? 1 : 0)} eggs. They hatch in 70 seconds if you keep thieves away, and pass on a mutation you choose.`, disabled: q.dna < 15 || q.hunger < 50 || q.clutches >= 3, onSelect: () => this.layClutch(q) },
       { label: 'Call a mate', value: '10 DNA', desc: 'A member of your own species joins your pack.', disabled: q.dna < 10 || q.pack.length >= this.packMax(q), onSelect: () => { if (q.dna < 10 || q.pack.length >= this.packMax(q)) return; q.dna -= 10; this.addMate(q); } },
       ...(G.mode === 2 && G.accord && o ? [{ label: `Give 20 DNA to P${o.p + 1}`, disabled: q.dna < 20, onSelect: () => { if (q.dna < 20) return; q.dna -= 20; o.dna += 20; toastP(o.p, `P${p + 1} sent you 20 DNA.`, 'good'); } }] : []),
       { label: 'Release your pack', disabled: !q.pack.length, onSelect: () => { for (const m of q.pack) { m.owner = -1; m.state = 'idle'; } q.pack = []; } },
@@ -193,7 +230,32 @@ const CreatureStage = {
   },
   addMate(q) {
     const P = G.players[q.p], sp = { id: 100 + q.p, name: P.name, body: P.body, B: q.B, ab: q.ab, temper: 'peaceful', ks: [.9, .9], allied: [true, true], hostile: [false, false], rel: [100, 100], kills: [0, 0], favs: [], need: 1, mate: true, cool: [0, 0], nest: q.nest };
-    const m = this.addNpc(sp, q.nest.x + rand(-3, 3), q.nest.z + rand(-3, 3), false); m.owner = q.p; m.state = 'follow'; m.mate = true; q.pack.push(m); Sfx.good(q.p);
+    const m = this.addNpc(sp, q.nest.x + rand(-3, 3), q.nest.z + rand(-3, 3), false); m.owner = q.p; m.state = 'follow'; m.mate = true; q.pack.push(m); Sfx.good(q.p); return m;
+  },
+  /* ---------- eggs, thieves and hatchlings ---------- */
+  layClutch(q) {
+    if (q.clutch || q.dna < 15 || q.hunger < 50 || q.clutches >= 3) return; const P = G.players[q.p];
+    q.dna -= 15; q.hunger -= 25; q.clutches++; q.clutch = { eggs: 2 + (hasFlag(P, 'clutch') ? 1 : 0), t: 70, thiefT: rand(14, 24) }; Sfx.good(q.p);
+    toastP(q.p, 'You laid a clutch. Egg thieves can smell it: stay near your nest, or come back and drive them off.', 'good');
+  },
+  updClutch(q, dt) {
+    const c = q.clutch; q.eggMeshes.forEach((e, i) => e.visible = !!c && i < c.eggs); if (!c) return;
+    c.t -= dt; c.thiefT -= dt;
+    if (c.thiefT <= 0 && c.eggs > 0) { c.thiefT = rand(24, 36); this.sendThief(q); }
+    if (c.t <= 0) this.hatch(q);
+  },
+  sendThief(q) {
+    const cand = this.species.filter(sp => !sp.mate && !sp.extinct && !sp.allied[q.p] && !['epic', 'rogue', 'giant'].includes(sp.temper) && this.living(sp).some(n => n.owner < 0));
+    if (!cand.length) return; const sp = cand.sort((a, b) => (b.diet !== 'herb') - (a.diet !== 'herb'))[0], a = rand(0, TAU);
+    const n = this.addNpc(sp, q.nest.x + Math.cos(a) * 55, q.nest.z + Math.sin(a) * 55, false); n.state = 'thief'; n.thiefOf = q.p; n.k *= .8; n.cr.k = n.k;
+    toastP(q.p, `A ${sp.name} is sneaking towards your eggs!`, 'warn');
+  },
+  hatch(q) {
+    const c = q.clutch, P = G.players[q.p]; q.clutch = null; if (!c || c.eggs <= 0) { toastP(q.p, 'Every egg was taken. Lay another clutch and guard it closer.', 'bad'); return; }
+    let joined = 0; for (let i = 0; i < c.eggs; i++) { if (q.pack.length < this.packMax(q)) { const m = this.addMate(q); m.juv = 60; m.k = .55; m.cr.k = .55; joined++; } else this.gain(q, 10, 4); }
+    q.hatched += c.eggs; this.gain(q, 20, 8, `${c.eggs} hatched`); this.fx.burst(q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 1, q.nest.z, hueCss(P.hue), 30, 6, 1, 4);
+    toastP(q.p, `${c.eggs} egg${c.eggs === 1 ? '' : 's'} hatched${joined ? `, and ${joined} young join your pack` : ''}.`, 'good');
+    offerGenes(q.p, 'Your hatchlings are not quite like you. Choose the mutation that spreads through your species.', { title: 'A new generation' });
   },
   refreshMate(m, q) { m.cr.dispose(); m.sp.B = q.B; m.sp.ab = q.ab; m.sp.body = G.players[q.p].body; m.cr = new Creature(q.B, m.k); this.scene.add(m.cr.group); },
   recruit(q, t) {
@@ -209,7 +271,8 @@ const CreatureStage = {
   unlockFrom(q, sp) { const P = G.players[q.p], c = sp.body.parts.map(pl => PARTS[pl.id]).filter(d => d && d.lock && !P.unlocked.includes(d.id)); if (c.length) { P.unlocked.push(c[0].id); toastP(q.p, `You learned the ${c[0].name} from the ${sp.name}.`, 'good'); } },
   /* ---------- damage ---------- */
   lvl(e, k) { return e.isPlayer ? e.ab.A[k] : e.sp.ab.A[k]; },
-  dmgFor(e, k) { const L = this.lvl(e, k), m = e.isPlayer ? G.players[e.p].mods.dmg : e.owner >= 0 ? G.players[e.owner].mods.dmg : 1, kk = e.isPlayer ? 1 : e.k; return ({ bite: 6 + L * 5, charge: 10 + L * 7, strike: 4 + L * 4.5, spit: 4 + L * 4, roar: 4 }[k]) * m * (.6 + kk * .4) * (e.sp && e.sp.temper === 'epic' ? 1.5 : 1); },
+  adren(q) { return q && q.isPlayer && hasFlag(G.players[q.p], 'adren') && q.hp < q.maxhp / 3 ? 1.4 : 1; },
+  dmgFor(e, k) { const L = this.lvl(e, k), m = (e.isPlayer ? G.players[e.p].mods.dmg * this.adren(e) : e.owner >= 0 ? G.players[e.owner].mods.dmg : 1), kk = e.isPlayer ? 1 : e.k; return ({ bite: 6 + L * 5, charge: 10 + L * 7, strike: 4 + L * 4.5, spit: 4 + L * 4, roar: 4 }[k]) * m * (.6 + kk * .4) * (e.sp && e.sp.temper === 'epic' ? 1.5 : 1); },
   spit(e, t) {
     const y = e.cr.head().y, m = new THREE.Mesh(sharedGeo('fruit', () => new THREE.SphereGeometry(1, 8, 6)), stdMat(0x9be15a, { emissive: 0x5aa020, emissiveIntensity: 1.2 })); m.scale.setScalar(.28); this.scene.add(m);
     let dx = Math.cos(e.a), dz = Math.sin(e.a); if (t) { const d = Math.hypot(t.x - e.x, t.z - e.z) || 1; dx = (t.x - e.x) / d; dz = (t.z - e.z) / d; }
@@ -226,7 +289,7 @@ const CreatureStage = {
     const d = Math.hypot(to.x - from.x, to.z - from.z) || 1, kx = (to.x - from.x) / d, kz = (to.z - from.z) / d, kk = to.isPlayer ? 1 : to.k;
     to.vx += kx * kb / kk; to.vz += kz * kb / kk;
     if (to.isPlayer) { dmg *= 1 - Math.min(.4, to.ab.A.health * .04); to.hp -= dmg; to.hurtT = 0; to.shake = Math.min(.5, to.shake + .25); Sfx.hurt(to.p); this.fx.text(to.x, to.cr.head().y + 2, to.z, '-' + Math.round(dmg), '#ff4d6d', to.p); if (to.duet) this.endDuet(to, false, true); to.combatT = 4; }
-    else { to.hp -= dmg; to.flash = .18; }
+    else { to.hp -= dmg; to.flash = .18; const vp = from.isPlayer ? from.p : from.owner; if (vp >= 0 && hasFlag(G.players[vp], 'venom')) { to.venom = 4; to.venomBy = from.isPlayer ? from : this.pl[vp]; } }
     if (from.isPlayer) { this.hitstop = Math.max(this.hitstop, opt.big ? .09 : .05); from.shake = Math.min(.4, from.shake + (opt.big ? .3 : .12)); this.fx.text(to.x, to.cr.head().y + 2.4, to.z, (opt.crit ? '★' : '') + Math.round(dmg), opt.crit ? '#f2b544' : '#ffe2d6', from.p); Sfx.hit(from.p); }
     this.fx.burst(to.x, to.cr.head().y, to.z, opt.crit ? '#f2b544' : '#ffd2c4', opt.big ? 14 : 7, 5, .35);
     to.lastHit = from.isPlayer ? from : from.owner >= 0 ? this.pl[from.owner] : from;
@@ -296,7 +359,10 @@ const CreatureStage = {
     if (Math.abs(c.right - ss) > 4) { c.left = -ss; c.right = ss; c.top = ss; c.bottom = -ss; c.updateProjectionMatrix(); }
     for (const sp of this.species) { sp.cool[0] = Math.max(0, sp.cool[0] - dt); sp.cool[1] = Math.max(0, sp.cool[1] - dt); }
     for (const q of this.pl) safely(() => this.updatePlayer(q, dt), () => this.respawn(q));
+    for (const q of this.pl) safely(() => this.updClutch(q, dt));
     for (const e of this.ents) if (!e.isPlayer && !e.dead) safely(() => this.updateNpc(e, dt), () => { e.hp = 0; });
+    /* steam over the sulphur field, spores over the marsh, only where someone can see them */
+    for (const zn of this.zones) { if (zn.kind === 'cold' || !this.pl.some(q => Math.hypot(q.x - zn.x, q.z - zn.z) < 140)) continue; if (Math.random() < dt * 7) { const a = rand(0, TAU), d = Math.sqrt(Math.random()) * zn.r, x = zn.x + Math.cos(a) * d, z = zn.z + Math.sin(a) * d; this.fx.burst(x, this.T.ground(x, z) + .5, z, zn.kind === 'heat' ? '#fff1d6' : '#a8e05a', 3, 1.5, 2.2, -1.5); } }
     this.separate();
     for (const e of this.ents) { if (e.isPlayer || e.dead || e.hp > 0) continue; this.killNpc(e); }
     this.ents = this.ents.filter(e => e.isPlayer || !e.dead);
@@ -333,6 +399,7 @@ const CreatureStage = {
       const o = this.pl[other(k.p)]; if (G.accord && o && o.lastHitOn === e) { this.gain(o, Math.round(big / 2), 3, 'assist'); }
     }
     if (e.owner >= 0) { const q = this.pl[e.owner]; q.pack = q.pack.filter(x => x !== e); toastP(e.owner, 'A pack member has fallen.', 'bad'); }
+    if (e.carry && e.thiefOf !== undefined) { const q = this.pl[e.thiefOf]; if (q && q.clutch) { q.clutch.eggs++; toastP(q.p, 'You got your egg back.', 'good'); } else if (q) this.gain(q, 8, 4, 'egg saved'); }
     for (const q of this.pl) if (q.target === e) q.target = null;
     for (const o of this.ents) if (o.target === e) { o.target = null; if (o.state === 'fight') o.state = 'idle'; }
     const sp = e.sp;
@@ -360,7 +427,8 @@ const CreatureStage = {
     if (mm > .1) q.sprintT += dt; else q.sprintT = 0;
     const sprint = q.sprintT > 1.4 && q.stam > .2; q.stam = clamp(q.stam + (sprint ? -dt : dt * .6), 0, 3 + A.speed * .4);
     const inW = this.T.isWater(q.x, q.z);
-    let spd = q.speed * (sprint ? 1.55 : 1) * (inW && q.lift < .5 ? .62 : 1) * d.m;
+    const gills = hasFlag(P, 'water');
+    let spd = q.speed * this.adren(q) * (sprint ? 1.55 : 1) * (inW && q.lift < .5 && !gills ? .62 : 1) * d.m;
     if (q.charging > 0) { q.charging -= dt; spd = q.speed * 2.8; q.x += Math.cos(q.a) * spd * dt; q.z += Math.sin(q.a) * spd * dt; if (Math.random() < .5) this.fx.burst(q.x, this.T.ground(q.x, q.z) + .3, q.z, '#e8dcc8', 2, 3, .4); for (const e of this.ents) { if (q.chargeHit || e === q || !this.alive(e) || e.owner === q.p || (e.isPlayer && !canHarm())) continue; if (Math.hypot(e.x - q.x, e.z - q.z) < this.reach(q, e)) { q.chargeHit = true; this.hit(q, e, this.dmgFor(q, 'charge'), 12, { big: true }); e.stun = 1; q.charging = 0; } } }
     else if (q.lungeT > 0) { q.lungeT -= dt; q.x += Math.cos(q.a) * q.lungeV * dt; q.z += Math.sin(q.a) * q.lungeV * dt; }
     else if (mm > .1) { const ta = Math.atan2(mvz, mvx); q.a = lerpAng(q.a, ta, dt * 10); q.x += Math.cos(ta) * spd * dt; q.z += Math.sin(ta) * spd * dt; }
@@ -374,9 +442,12 @@ const CreatureStage = {
     if (q.combatT > 0 && t && Math.hypot(t.x - q.x, t.z - q.z) < 25) q.camYaw = lerpAng(q.camYaw, Math.atan2(t.z - q.z, t.x - q.x), dt * 1.6);
     else if (mm > .1 && (mvx * fx + mvz * fz) > -.3) q.camYaw = lerpAng(q.camYaw, q.a, dt * 1.3);
     // needs
-    q.hunger -= dt * .4; if (q.hunger <= 0) { q.hunger = 0; q.hp -= 2 * dt; q.hurtT = 0; if (q.hp <= 0) this.die(q); }
+    q.hunger -= dt * .4 * (hasFlag(P, 'fat') ? .66 : 1) * (hasFlag(P, 'photo') && !this.day.isNight ? .7 : 1); if (q.hunger <= 0) { q.hunger = 0; q.hp -= 2 * dt; q.hurtT = 0; if (q.hp <= 0) this.die(q); }
     const atNest = Math.hypot(q.x - q.nest.x, q.z - q.nest.z) < 10;
-    q.hp = Math.min(q.maxhp, q.hp + q.maxhp * ((atNest ? .08 : q.hurtT > 5 && q.hunger > 25 ? .03 : 0)) * dt);
+    q.hp = Math.min(q.maxhp, q.hp + q.maxhp * ((atNest ? .08 : q.hurtT > 5 && q.hunger > 25 ? .03 * (hasFlag(P, 'regen') ? 2 : 1) : 0) + (gills && inW ? .02 : 0)) * dt);
+    /* hostile ground: without the matching gene it wears you down */
+    const zone = q.lift < 2 ? this.zoneAt(q.x, q.z) : null; q.zone = zone;
+    if (zone && !hasFlag(P, zone)) { q.hp -= q.maxhp * .035 * dt; q.hurtT = 0; q.zoneT = (q.zoneT || 0) + dt; if (q.zoneT > 1.2) { q.zoneT = 0; this.fx.burst(q.x, q.cr.head().y, q.z, zone === 'cold' ? '#dff4ff' : zone === 'heat' ? '#ffb347' : '#9be15a', 4, 3, .5); } if (q.hp <= 0) this.down(q, null); }
     for (const b of this.bushes) if (b.fruit > 0 && q.hunger < 92 && this.canEat(q, 'fruit') && Math.hypot(b.x - q.x, b.z - q.z) < 3 + q.cr.B.len * .5) { b.fruit--; q.hunger = Math.min(100, q.hunger + 24 * P.mods.econ); this.gain(q, 1, 1); q.cr.st.eat = .6; Sfx.eat(q.p); }
     for (const m of this.meat) if (m.food > 0 && q.hunger < 94 && this.canEat(q, 'meat') && Math.hypot(m.x - q.x, m.z - q.z) < 2.5 + q.cr.B.len * .5) { m.food--; q.hunger = Math.min(100, q.hunger + 32); this.gain(q, 1, 2); q.cr.st.eat = .6; Sfx.eat(q.p); if (m.food <= 0) m.life = 0; }
     // auto-targeting: nearest in front, sticky; manual choice holds for a while
@@ -393,6 +464,8 @@ const CreatureStage = {
   },
   updateNpc(n, dt) {
     const sp = n.sp, T = sp.temper; for (const k in n.cds) n.cds[k] -= dt; n.flash -= dt; n.think -= dt; n.stun -= dt; n.hungerT -= dt;
+    if (n.venom > 0) { n.venom -= dt; n.hp -= 6 * dt; n.lastHit = n.venomBy || n.lastHit; if (Math.random() < dt * 5) this.fx.burst(n.x, n.cr.head().y, n.z, '#9be15a', 1, 2, .5); }
+    if (n.juv > 0) { n.juv -= dt; n.k = .55 + (1 - n.juv / 60) * .35; n.cr.k = n.k; }
     const night = this.day.isNight;
     let near = 1e9; for (const q of this.pl) near = Math.min(near, Math.hypot(q.x - n.x, q.z - n.z)); n.cr.setVisible(near < 140);
     n.x += n.vx * dt; n.z += n.vz * dt; const fr = Math.max(0, 1 - dt * 5); n.vx *= fr; n.vz *= fr;
@@ -415,6 +488,15 @@ const CreatureStage = {
       case 'flee': { const t = n.target; n.fleeT = (n.fleeT || 4) - dt; if (n.fleeT <= 0) { n.state = 'idle'; break; } if (t && !t.dead) { tx = n.x + (n.x - t.x); tz = n.z + (n.z - t.z); } else { tx = sp.nest.x; tz = sp.nest.z; } spd = n.speed * 1.12; n.hp = Math.min(n.maxhp, n.hp + 2 * dt); break; }
       case 'raid': { const q = this.pl[n.raiding]; if (!q) { n.state = 'idle'; break; } const d = Math.hypot(q.nest.x - n.x, q.nest.z - n.z); if (this.alive(q) && Math.hypot(q.x - n.x, q.z - n.z) < 18 && q.inv <= 0) { n.state = 'fight'; n.target = q; break; } if (d > 6) { tx = q.nest.x; tz = q.nest.z; spd = n.speed * .9; } else { n.lootT = (n.lootT || 0) + dt; n.cr.st.eat = 1; if (n.lootT > 6) { n.lootT = 0; const lost = Math.min(q.dna, 10); q.dna -= lost; if (lost) { if (!q.raidToastT || this.t - q.raidToastT > 20) { q.raidToastT = this.t; toastP(q.p, `Raiders are stealing DNA from your nest! Get home and drive them off.`, 'bad'); } this.fx.text(q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 3, q.nest.z, `-${lost} DNA`, '#ff4d6d', q.p); } n.raidLoots = (n.raidLoots || 0) + 1; if (n.raidLoots >= 4) { n.state = 'idle'; n.raiding = undefined; n.cr.st.eat = 0; } } } break; }
       case 'lurk': { n.cr.st.sleep = true; n.cr.update(dt, n.x, n.z, n.a, this.ground); return; }
+      case 'thief': {
+        const q = this.pl[n.thiefOf], c = q && q.clutch; if (!q || (!c && !n.carry)) { n.state = 'idle'; n.thiefOf = undefined; break; }
+        if (n.carry) { tx = sp.nest.x; tz = sp.nest.z; spd = n.speed * 1.1; if (Math.hypot(sp.nest.x - n.x, sp.nest.z - n.z) < 6) { n.carry = false; n.state = 'idle'; n.thiefOf = undefined; } break; }
+        const guard = this.alive(q) && Math.hypot(q.x - q.nest.x, q.z - q.nest.z) < 14, dn = Math.hypot(q.nest.x - n.x, q.nest.z - n.z);
+        if (guard) { const a = Math.atan2(n.z - q.nest.z, n.x - q.nest.x); tx = q.nest.x + Math.cos(a) * 30; tz = q.nest.z + Math.sin(a) * 30; spd = n.speed * .5; n.stealT = 0; break; }
+        if (dn > 3) { tx = q.nest.x; tz = q.nest.z; spd = n.speed * .8; break; }
+        n.stealT = (n.stealT || 0) + dt; n.cr.st.eat = 1; if (n.stealT > 3.5 && c.eggs > 0) { c.eggs--; n.carry = true; n.stealT = 0; n.cr.st.eat = 0; toastP(q.p, `The ${sp.name} stole an egg! Catch it before it gets home.`, 'bad'); Sfx.bad(q.p); }
+        n.cr.update(dt, n.x, n.z, n.a, this.ground); return;
+      }
       case 'eat': { const m = n.target; if (!m || (m.life !== undefined && m.life <= 0) || (m.fruit !== undefined && m.fruit <= 0)) { n.state = 'idle'; break; } if (Math.hypot(m.x - n.x, m.z - n.z) > 2.5 + n.cr.B.len * n.k * .5) { tx = m.x; tz = m.z; spd = n.speed * .7; } else { n.eatT = (n.eatT || 0) + dt; n.cr.st.eat = 1; if (n.eatT > 2.5) { n.eatT = 0; n.cr.st.eat = 0; if (m.food !== undefined) { m.food--; if (m.food <= 0) m.life = 0; } else m.fruit--; n.hungerT = rand(50, 90); n.state = 'idle'; } } break; }
       case 'sleep': n.cr.st.sleep = true; n.cr.update(dt, n.x, n.z, n.a, this.ground); return;
       case 'duet': { const q = n.duetWith; if (!q || !q.duet) { n.state = 'idle'; break; } n.a = lerpAng(n.a, Math.atan2(q.z - n.z, q.x - n.x), dt * 5); const s = n.cr.st; for (const k of ['sing', 'dance', 'charm', 'pose']) s[k] = q.duet.ask === k && q.duet.demo > 0; n.cr.update(dt, n.x, n.z, n.a, this.ground); return; }
@@ -432,7 +514,7 @@ const CreatureStage = {
   },
   decide(n, night) {
     const sp = n.sp, T = sp.temper; if (n.owner >= 0) { if (n.state !== 'fight') n.state = 'follow'; return; }
-    if (n.state === 'duet' || n.state === 'raid' || (n.state === 'eat' && n.target) || n.state === 'flee') return;
+    if (n.state === 'duet' || n.state === 'raid' || n.state === 'thief' || (n.state === 'eat' && n.target) || n.state === 'flee') return;
     if (n.state === 'fight' && this.alive(n.target)) return;
     // ambushers lie in wait and pounce
     if (T === 'ambusher') {
@@ -451,7 +533,7 @@ const CreatureStage = {
     // aggression toward players
     for (const q of this.pl) {
       if (!this.alive(q) || q.inv > 0 || sp.allied[q.p]) continue; const d = Math.hypot(q.x - n.x, q.z - n.z), sneak = q.ab.A.sneak * 2;
-      const go = T === 'territorial' ? Math.hypot(q.x - sp.nest.x, q.z - sp.nest.z) < 22 : T === 'aggressive' ? d < 18 - sneak && sp.rel[q.p] < 30 : T === 'nocturnal' ? night && d < 26 - sneak : T === 'epic' || T === 'rogue' ? d < 28 - sneak : T === 'spitter' ? d < 20 - sneak && sp.rel[q.p] < 30 : sp.hostile[q.p] && d < 18;
+      const go = T === 'territorial' ? Math.hypot(q.x - sp.nest.x, q.z - sp.nest.z) < 22 : T === 'aggressive' ? d < 18 - sneak && sp.rel[q.p] < 30 : T === 'nocturnal' ? night && d < (hasFlag(G.players[q.p], 'night') ? 12 : 26) - sneak : T === 'epic' || T === 'rogue' ? d < 28 - sneak : T === 'spitter' ? d < 20 - sneak && sp.rel[q.p] < 30 : sp.hostile[q.p] && d < 18;
       if (go && !(q.duet && q.duet.sp === sp)) { n.state = 'fight'; n.target = q; if (T === 'aggressive') for (const o of this.ents) if (o.sp === sp && o !== n && !o.dead && o.owner < 0 && o.state !== 'fight' && Math.hypot(o.x - n.x, o.z - n.z) < 40) { o.state = 'fight'; o.target = q; } return; }
       if (T === 'territorial' && Math.hypot(q.x - sp.nest.x, q.z - sp.nest.z) < 32 && !n.warned) { n.warned = 4; this.fx.text(n.x, n.cr.head().y + 2.5, n.z, 'GRRR', '#ffb347', q.p); }
     }
@@ -545,6 +627,33 @@ const CreatureStage = {
     this.gain(q, 35, 30, 'BOUNTY!'); toastAll(`P${q.p + 1} claimed the bounty!`, 'good');
     if (G.accord && o) { this.gain(o, 20, 15, 'shared bounty'); }
   },
+  calm(p) { const q = this.pl[p]; return q && this.alive(q) && q.combatT <= 0 && !q.duet && !this.ents.some(e => !e.isPlayer && !e.dead && e.state === 'fight' && e.target === q); },
+  memoryBonus(p) { this.pl[p].dna += 10; return '+10 DNA.'; },
+  onGene(p) { const q = this.pl && this.pl[p]; if (!q) return; const P = G.players[p], f = q.hp / q.maxhp; q.maxhp = this.hpFor(q.ab, 1, P.mods); q.hp = q.maxhp * f; q.speed = (6 + q.ab.A.speed * 1.5) * (q.ab.legs ? 1 : .6) * (P.mods.speed || 1); },
+  /* ---------- the chronicle ---------- */
+  chronicle: [
+    { id: 'wounded', title: 'The wounded stranger', when(p) { return this.species.some(sp => !sp.mate && !sp.extinct && !sp.allied[p] && !sp.hostile[p] && !['epic', 'rogue'].includes(sp.temper)); },
+      text(p) { const sp = this.species.find(sp => !sp.mate && !sp.extinct && !sp.allied[p] && !sp.hostile[p] && !['epic', 'rogue'].includes(sp.temper)); (this._wounded = this._wounded || [])[p] = sp; return `A young ${sp.name} lies hurt in the grass near your nest, crying for its herd.`; },
+      choices: [
+        { label: 'Tend to it', desc: 'Its herd will remember: +35 friendship with them.', go(p) { const sp = (this._wounded || [])[p]; if (sp && !sp.allied[p] && !sp.hostile[p]) { this.addRel(this.pl[p], sp, 35); return `The ${sp.name} take note of your kindness.`; } return 'It limps away.'; } },
+        { label: 'Eat it', desc: 'A full belly and +12 brain. Needs a meat-eating mouth.', ok(p) { return this.canEat(this.pl[p], 'meat'); }, go(p) { const q = this.pl[p]; q.hunger = 100; this.gain(q, 12, 4); return 'Nature is not kind.'; } }] },
+    { id: 'storm', title: 'A storm is coming', text: 'The sky has gone green and the wind is tearing at the trees. Something big is about to break.',
+      choices: [
+        { label: 'Run for the nest', desc: 'You and your pack shelter at home and come out healed.', go(p) { const q = this.pl[p]; if (!this.alive(q)) return ''; q.x = q.nest.x; q.z = q.nest.z - 6; q.cr.init = false; q.hp = q.maxhp; for (const m of q.pack) { m.x = q.x + rand(-4, 4); m.z = q.z + rand(-4, 4); m.cr.init = false; m.hp = m.maxhp; } return 'You sit it out in the nest.'; } },
+        { label: 'Weather it in the open', desc: 'It hurts, but you learn: +30 brain and lose a third of your health.', go(p) { const q = this.pl[p]; if (!this.alive(q)) return ''; q.hp = Math.max(1, q.hp - q.maxhp / 3); this.gain(q, 30, 6, '+30 brain'); return 'You will remember this storm.'; } }] },
+    { id: 'fruit', title: 'Strange fruit', text: 'In a hollow log you find fruit that glows faintly, warm to the touch. Nothing else will eat it.',
+      choices: [
+        { label: 'Eat it', desc: 'It might change you. It might make you very sick.', go(p) { const q = this.pl[p]; if (Math.random() < .6) { offerGenes(p, 'The fruit is rewriting you from the inside.'); return 'Something is happening to you.'; } q.hunger = Math.max(0, q.hunger - 45); return 'You are very, very sick. Hunger drained.'; } },
+        { label: 'Leave it', desc: '+8 DNA for the curiosity.', go(p) { this.pl[p].dna += 8; return '+8 DNA.'; } }] },
+    { id: 'elder', title: 'An elder of your kind', text: 'An old, scarred member of your own species has wandered in from far away. It has seen things.',
+      choices: [
+        { label: 'Follow its stories', desc: '+25 brain, and it shows you where to find a wonder.', go(p) { const q = this.pl[p]; this.gain(q, 25, 5, '+25 brain'); const w = Disc.list.filter(x => !x.found[p]).sort((a, b) => Math.hypot(a.x - q.x, a.z - q.z) - Math.hypot(b.x - q.x, b.z - q.z))[0]; return w ? `It tells you of ${w.name}, ${Math.round(Math.hypot(w.x - q.x, w.z - q.z))} m away.` : 'It has nothing left to teach you.'; } },
+        { label: 'Take it into your pack', desc: 'A tough old pack member, if there is room.', ok(p) { return this.pl[p].pack.length < this.packMax(this.pl[p]); }, go(p) { const q = this.pl[p], m = this.addMate(q); m.k = 1.15; m.cr.k = 1.15; m.maxhp = m.hp = m.maxhp * 1.6; return 'The elder walks with you now.'; } }] },
+    { id: 'rivalnest', title: 'An empty nest', when(p) { return G.mode === 2 && !G.accord; }, text: p => `You come across P${other(p) + 1}'s nest with no one guarding it.`,
+      choices: [
+        { label: 'Raid it', desc: 'Steal up to 20 of their DNA. They will hear about it.', go(p) { const o = this.pl[other(p)], q = this.pl[p], st = Math.min(20, Math.floor(o.dna)); o.dna -= st; q.dna += st; toastP(o.p, `P${p + 1} raided your nest and took ${st} DNA.`, 'bad'); return `+${st} DNA.`; } },
+        { label: 'Leave it be', desc: '+15 brain. Sometimes doing nothing is the clever thing.', go(p) { this.gain(this.pl[p], 15, 0); return '+15 brain.'; } }] },
+  ],
   /* ---------- view ---------- */
   camFor(i, cam, dt) {
     const q = this.pl[i]; if (!q) return; const k = dt ? Math.min(1, dt * 4) : 1, L = q.cr.B.len, Hh = q.cr.B.height, dist = 9 + L * 1.6, hgt = 3.4 + Hh * 1.2, ca = Math.cos(q.camYaw), sa = Math.sin(q.camYaw);
@@ -553,7 +662,7 @@ const CreatureStage = {
     if (q.shake > 0) { cam.position.x += (Math.random() - .5) * q.shake * .8; cam.position.y += (Math.random() - .5) * q.shake * .6; }
     _kv4.set(q.x + ca * 7, this.T.ground(q.x, q.z) + Hh * .95 + q.lift * .6, q.z + sa * 7); if (!q._look) q._look = _kv4.clone(); q._look.lerp(_kv4, k); cam.lookAt(q._look);
   },
-  beforeRender(i, cam) { const q = this.pl[i]; if (!q) return; this.T.clearView(cam, q.x, 0, q.z); this.wfx.beforeRender(cam); const sight = q.ab.A.sight; this.scene.fog.density = (this.day.isNight ? .016 - sight * .002 : .0052 - sight * .0008); },
+  beforeRender(i, cam) { const q = this.pl[i]; if (!q) return; this.T.clearView(cam, q.x, 0, q.z); this.wfx.beforeRender(cam); const sight = q.ab.A.sight, P = G.players[i], ne = hasFlag(P, 'night'); this.scene.fog.density = (this.day.isNight && !ne ? .016 - sight * .002 : .0052 - sight * .0008) * (hasFlag(P, 'eyes') ? .7 : 1); },
   edge(pane, i, x, y, z, html, col) { return edgeMark(pane, i, x, y, z, html, col); },
   labels(i) {
     const pane = Panes[i], q = this.pl[i]; if (!q) return;
@@ -586,13 +695,15 @@ const CreatureStage = {
     }
     for (const b of this.bones) if (!b.dug[i] && Math.hypot(b.x - q.x, b.z - q.z) < 70) { const s = project(_kv4.set(b.x, this.T.h(b.x, b.z) + 4, b.z), i); if (s) pane.label(s.x, s.y, `<span style="color:#ffd34d">Bone pile</span>${Math.hypot(b.x - q.x, b.z - q.z) < 6 ? `<small>press ${KEYLABEL[i].menu} to dig</small>` : ''}`); }
     for (const sp of this.species) if (sp.nest && !['epic', 'rogue'].includes(sp.temper) && Math.hypot(sp.nest.x - q.x, sp.nest.z - q.z) < 90) { const s = project(_kv4.set(sp.nest.x, this.T.ground(sp.nest.x, sp.nest.z) + 2.5, sp.nest.z), i); if (s) pane.label(s.x, s.y, `<small style="color:${sp.extinct ? '#706890' : sp.allied[i] ? '#a6d96a' : sp.hostile[i] ? '#ff4d6d' : '#f2b544'}">${esc(sp.name)} nest${sp.extinct ? ' · extinct' : sp.allied[i] ? ' · allies' : ''}</small>`); }
-    if (Math.hypot(q.nest.x - q.x, q.nest.z - q.z) < 60) { const s = project(_kv4.set(q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 3, q.nest.z), i); if (s) pane.label(s.x, s.y, `<span style="color:${hueCss(G.players[i].hue)}">Your nest</span>${Math.hypot(q.nest.x - q.x, q.nest.z - q.z) < 10 ? `<small>press ${KEYLABEL[i].menu} to evolve</small>` : ''}`); }
+    if (Math.hypot(q.nest.x - q.x, q.nest.z - q.z) < 60) { const s = project(_kv4.set(q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 3, q.nest.z), i); if (s) pane.label(s.x, s.y, `<span style="color:${hueCss(G.players[i].hue)}">Your nest</span>${q.clutch ? `<small style="color:#f2b544">${q.clutch.eggs} egg${q.clutch.eggs === 1 ? '' : 's'} · hatch in ${Math.ceil(q.clutch.t)}s</small>` : ''}${Math.hypot(q.nest.x - q.x, q.nest.z - q.z) < 10 ? `<small>press ${KEYLABEL[i].menu} for the nest</small>` : ''}`); }
+    else if (q.clutch) this.edge(pane, i, q.nest.x, this.T.ground(q.nest.x, q.nest.z) + 3, q.nest.z, `eggs · ${Math.ceil(q.clutch.t)}s`, '#f2b544');
+    for (const e of this.ents) if (!e.dead && e.state === 'thief' && e.thiefOf === i) { const y = e.cr.head().y + 2; if (!this.edge(pane, i, e.x, y, e.z, e.carry ? 'egg thief!' : 'thief', '#ff7a59')) { const s = project(_kv4.set(e.x, y, e.z), i); if (s) pane.label(s.x, s.y, `<b style="color:#ff7a59">${e.carry ? 'EGG THIEF' : 'thief'}</b>`); } }
     this.fx.labels(i);
   },
   hud(q) {
     const pane = Panes[q.p], A = q.ab.A, lv = this.brainLvl(q);
     pane.meter('hp', Math.max(0, q.hp), q.maxhp); pane.meter('hu', q.hunger, 100, Math.round(q.hunger) + '%'); pane.meter('br', q.prog, BRAIN[5], `level ${lv} · ${Math.floor(q.prog)}/${BRAIN[5]}`);
-    pane.stat('dna', q.dna); pane.stat('pack', `${q.pack.length}/${this.packMax(q)}`); pane.stat('won', `${Disc.count(q.p)}/${Disc.list.length}`); pane.stat('time', this.day.isNight ? 'Night' : 'Day');
+    pane.stat('dna', q.dna); pane.stat('pack', `${q.pack.length}/${this.packMax(q)}`); pane.stat('won', `${Disc.count(q.p)}/${Disc.list.length}`); pane.stat('time', this.day.isNight ? 'Night' : 'Day'); pane.stat('eggs', q.clutch ? `${q.clutch.eggs} · ${Math.ceil(q.clutch.t)}s` : q.clutches >= 3 ? 'done' : 'none'); pane.stat('gen', (G.players[q.p].genes || []).length);
     if (q.duet) { pane.acts(SOCIALS.map(s => ({ act: s.act, label: s.k, icon: s.icon, lv: A[s.k] || 0, off: !A[s.k], hot: q.duet.ask === s.k && q.duet.demo <= 0 })).concat([{ act: 'back', label: 'Stop', icon: 'swap' }])); }
     else {
       const atk = A.strike > A.bite ? 'strike' : 'bite', spec = A.charge ? 'charge' : A.spit ? 'spit' : 'roar', o = this.pl[other(q.p)];
@@ -606,7 +717,8 @@ const CreatureStage = {
         { act: 'menu', label: rev ? 'Revive' : atNest ? 'Nest' : bp ? 'Dig' : inv ? 'Invite' : 'Use', icon: rev ? 'mate' : atNest ? 'edit' : bp ? 'eat' : inv ? 'mate' : 'menu', hot: rev || atNest || bp || inv, off: !(rev || atNest || bp || inv) },
         { act: 'back', label: 'target', icon: 'swap' }]);
     }
-    if (!(q.dead > 0) && !(q.downed > 0)) pane.prompt(q.hunger < 20 ? (this.canEat(q, 'fruit') ? 'Starving: walk into fruit bushes to eat' : 'Starving: hunt, then walk over the meat') : q.duet ? '' : this.ents.some(e => !e.isPlayer && e.windup && e.target === q) ? 'Incoming attack: dodge!' : '');
+    const zn = q.zone && !hasFlag(G.players[q.p], q.zone) ? { cold: ['Freezing', 'Antifreeze Blood'], heat: ['Scalding ground', 'Heat Scales'], toxin: ['Toxic marsh', 'an Iron Liver'] }[q.zone] : null, thief = this.ents.find(e => !e.dead && e.state === 'thief' && e.thiefOf === q.p);
+    if (!(q.dead > 0) && !(q.downed > 0)) pane.prompt(zn ? `${zn[0]}: it is hurting you. ${zn[1]} would protect you.` : thief && thief.carry ? 'A thief has one of your eggs: catch it!' : q.hunger < 20 ? (this.canEat(q, 'fruit') ? 'Starving: walk into fruit bushes to eat' : 'Starving: hunt, then walk over the meat') : q.duet ? '' : this.ents.some(e => !e.isPlayer && e.windup && e.target === q) ? 'Incoming attack: dodge!' : '');
   },
   musicMood() { let m = 0; for (const q of this.pl) { if (q.combatT > 0) m = 1; else if (this.events.some(e => e.kind === 'raid' && e.p === q.p)) m = Math.max(m, .6); else if (this.day.isNight) m = Math.max(m, .2); } return m; },
   exit() { for (const e of this.ents) if (e.cr) e.cr.dispose(); for (const e of this.events) if (e.beam) this.scene.remove(e.beam); },

@@ -231,3 +231,12 @@ function wonderSites(r, n, kinds, minD, maxD, avoid = []) {
   }
   return out;
 }
+/* repaint the ground under biome zones: f(x, y, z) returns [r, g, b, amount] in display colour, or null to leave it */
+function tintTerrain(T, f) {
+  const geo = T.mesh.geometry, pos = geo.attributes.position, col = geo.attributes.color;
+  for (let i = 0; i < pos.count; i++) {
+    const t = f(pos.getX(i), pos.getY(i), pos.getZ(i)); if (!t || t[3] <= 0) continue; const k = clamp(t[3], 0, 1);
+    col.setXYZ(i, lerp(col.getX(i), Math.pow(t[0], 2.2), k), lerp(col.getY(i), Math.pow(t[1], 2.2), k), lerp(col.getZ(i), Math.pow(t[2], 2.2), k));
+  }
+  col.needsUpdate = true;
+}

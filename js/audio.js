@@ -19,7 +19,7 @@ const AudioCfg = {
 };
 /* ---------- the engine: buses, echo, noise ---------- */
 Object.assign(Sfx, {
-  bus: null, main: null, noiseBuf: null,
+  bus: {}, /* empty until the first key or click starts audio, so effects before that are silent instead of throwing */ main: null, noiseBuf: null,
   init() {
     if (this.ac) { if (this.ac.state === 'suspended') this.ac.resume(); return; }
     try {

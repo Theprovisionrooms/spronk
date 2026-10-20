@@ -183,7 +183,7 @@ let gameClock = 0;
 function setStage(st) {
   if (S && S.exit) S.exit(); if (S && S.scene) disposeScene(S.scene);
   for (const m of Menus) m.close(); for (const p of Panes) p.clear(); for (const c of cams) if (c.view && c.view.enabled) c.clearViewOffset();
-  Flow.ready = [null, null]; Flow.done = [null, null]; Flow.finishing = false; Disc.reset();
+  Flow.ready = [null, null]; Flow.done = [null, null]; Flow.finishing = false; Disc.reset(); Decide.reset(); Story.reset();
   S = st; st.enter(); S._snap = 3; updateStageBar(); updateAccord(); Q.grace = 3;
   Music.play(st.idx === undefined ? 'title' : ['cell', 'creature', 'tribe', 'civ', 'space'][st.idx]);
 }
@@ -235,7 +235,11 @@ function evolve(p) {
 function unEvolve(p) { if (!Flow.done[p] || Flow.finishing) return; Flow.done[p] = null; flowChip(p); flowChip(other(p)); }
 /* menu entries every stage adds to its main menu */
 function evolveItems(p) {
-  if (!S || S.idx === undefined || S.idx >= 4) return [];
+  const dec = Decide.items(p);
+  if (!S || S.idx === undefined || S.idx >= 4) return dec;
+  return dec.concat(evolveOnly(p));
+}
+function evolveOnly(p) {
   const next = STAGE_NAMES[S.idx + 1];
   if (Flow.done[p]) return [{ head: true, label: 'Evolution' }, { label: `Waiting for P${other(p) + 1}`, desc: 'You will evolve together. Choose this to stay a while longer.', onSelect: () => unEvolve(p) }];
   if (!canEvolve(p)) return [];
@@ -244,7 +248,8 @@ function evolveItems(p) {
 function flowChip(p) {
   const pane = Panes[p]; if (!pane) return;
   const d = Flow.done[p], hint = S && S.evolveHint ? S.evolveHint(p) : 'open your menu';
-  pane.chip(d ? `Evolving · waiting for P${other(p) + 1}` : canEvolve(p) ? `Ready to evolve · ${hint}` : '', d ? '' : 'go');
+  const dec = Decide.pending(p), c = dec && Decide.q[p][0];
+  pane.chip(d ? `Evolving · waiting for P${other(p) + 1}` : dec ? `${c.kind === 'gene' ? 'Mutation waiting' : 'Decision waiting'} · ${hint}` : canEvolve(p) ? `Ready to evolve · ${hint}` : '', d ? '' : 'go');
 }
 function finishStage() {
   if (Flow.finishing) return; Flow.finishing = true; const idx = S.idx;
@@ -260,7 +265,7 @@ function finishStage() {
   G.stage = idx + 1; saveGame(); Sfx.evolve();
   const ready = [false, false];
   const html = () => `<div class="eyebrow">Stage ${idx + 1} complete</div><h2>${['Out of the water', 'A mind awakens', 'The first city', 'To the stars'][idx]}</h2>
-    <div class="results">${G.players.slice(0, G.mode).map((P, p) => { const d = Flow.done[p], ls = P.legacies.filter(l => l.stage === idx); return `<div><div class="who" style="margin-bottom:6px"><i style="background:${hueCss(P.hue)};width:10px;height:10px;border-radius:2px;display:inline-block"></i> ${G.mode === 2 ? 'P' + (p + 1) + ' · ' : ''}${esc(P.name)}</div>${d.lines.map(l => `<p style="margin:4px 0">${esc(l)}</p>`).join('')}${ls.map(legacyCard).join('<div style="height:8px"></div>')}${modsHTML(P)}</div>`; }).join('')}</div>
+    <div class="results">${G.players.slice(0, G.mode).map((P, p) => { const d = Flow.done[p], ls = P.legacies.filter(l => l.stage === idx); return `<div><div class="who" style="margin-bottom:6px"><i style="background:${hueCss(P.hue)};width:10px;height:10px;border-radius:2px;display:inline-block"></i> ${G.mode === 2 ? 'P' + (p + 1) + ' · ' : ''}${esc(P.name)}</div>${d.lines.map(l => `<p style="margin:4px 0">${esc(l)}</p>`).join('')}${ls.map(legacyCard).join('<div style="height:8px"></div>')}${modsHTML(P)}${(P.genes || []).length ? `<div class="eyebrow" style="margin-top:10px">Genome</div>${genomeHTML(P)}` : ''}</div>`; }).join('')}</div>
     <div class="row"><button class="btn primary" data-act="go">Begin the ${STAGE_NAMES[idx + 1]} stage</button>${G.mode === 2 ? `<span class="ready">P1 ${ready[0] ? '<b>ready</b>' : `press ${KEYLABEL[0].a1}`} · P2 ${ready[1] ? '<b>ready</b>' : `press ${KEYLABEL[1].a1}`}</span>` : `<span class="ready">or press ${KEYLABEL[0].a1} / F</span>`}</div>`;
   const go = () => { Modal.close(); if (idx === 0) runEditors(G.players.slice(0, G.mode).map(P => P.i), 'creature', () => startStage(1), true); else startStage(idx + 1); };
   Modal.open(html(), { go }, { onPress: (p, act) => { if (act === 'a1' || act === 'menu') { ready[p] = true; if (ready.slice(0, G.mode).every(Boolean)) go(); else Modal.rerender(html()); } } });
@@ -293,14 +298,15 @@ const Disc = {
       if (s.spin) s.spin(dt);
       for (let p = 0; p < G.mode; p++) {
         if (s.found[p]) continue; const q = pos(p); if (!q) continue;
-        if (this.d(q, s) < s.r) this.find(s, p);
+        if (this.d(q, s) < s.r * (hasFlag(G.players[p], 'memory') ? 1.5 : 1)) this.find(s, p);
       }
       if (s.beacon) s.beacon.visible = s.found.slice(0, G.mode).some(f => !f);
     }
   },
   find(s, p) {
     s.found[p] = true; const P = G.players[p]; P.journal = P.journal || []; P.journal.push({ stage: S.idx, name: s.name });
-    const got = s.reward ? s.reward(p) : ''; Sfx.discover(p);
+    let got = s.reward ? s.reward(p) : ''; Sfx.discover(p);
+    if (hasFlag(P, 'memory') && S && S.memoryBonus) { const b = S.memoryBonus(p); if (b) got = (got ? got + ' ' : '') + `Long Memory: ${b}`; }
     toastP(p, `Discovered: ${s.name}. ${s.lore}${got ? ' ' + got : ''}`, 'good');
     if (S && S.fx) S.fx.burst(s.x, (s.y || 0) + 4, s.z, '#ffe08a', 30, 10, 1.2, s.up ? 0 : 4);
   },
@@ -308,12 +314,12 @@ const Disc = {
   labels(i, pos, yOf, edge) {
     const pane = Panes[i], q = pos(i); if (!q) return;
     /* only the two nearest unfound wonders get a compass mark, so the edge of the screen stays readable */
-    const near = this.list.filter(s => !s.found[i]).map(s => [s, this.d(q, s)]).sort((a, b) => a[1] - b[1]).slice(0, 2).map(o => o[0]);
+    const mem = hasFlag(G.players[i], 'memory') ? 1.5 : 1, near = this.list.filter(s => !s.found[i]).map(s => [s, this.d(q, s)]).sort((a, b) => a[1] - b[1]).slice(0, mem > 1 ? 3 : 2).map(o => o[0]);
     for (const s of this.list) {
       const d = this.d(q, s), y = yOf(s);
       const seen = !this.vis || this.vis(i, s);
-      if (d < (s.see || 260) && seen) { const v = project(_dv.set(s.x, y, s.z), i); if (v) { pane.label(v.x, v.y, s.found[i] ? `<small style="color:#d8c99a">${esc(s.name)}</small>` : `<span style="color:#ffe08a">${s.icon || '✦'} ${d < (s.nameAt || 70) ? esc(s.name) : 'Something out there'}</span><small>${Math.round(d)} ${this.unit}</small>`); continue; } }
-      if (edge && near.includes(s) && d < (s.far || 420)) edge(pane, i, s.x, y, s.z, `${s.icon || '✦'} ${Math.round(d)} ${this.unit}`, '#ffe08a', !seen);
+      if (d < (s.see || 260) * mem && seen) { const v = project(_dv.set(s.x, y, s.z), i); if (v) { pane.label(v.x, v.y, s.found[i] ? `<small style="color:#d8c99a">${esc(s.name)}</small>` : `<span style="color:#ffe08a">${s.icon || '✦'} ${d < (s.nameAt || 70) ? esc(s.name) : 'Something out there'}</span><small>${Math.round(d)} ${this.unit}</small>`); continue; } }
+      if (edge && near.includes(s) && d < (s.far || 420) * mem) edge(pane, i, s.x, y, s.z, `${s.icon || '✦'} ${Math.round(d)} ${this.unit}`, '#ffe08a', !seen);
     }
   },
   journalHTML(P) { const j = P.journal || []; return j.length ? `<div class="mods">${j.map(e => `<span>${esc(STAGE_NAMES[e.stage] || '')} · ${esc(e.name)}</span>`).join('')}</div>` : '<p style="font-size:12.5px">No wonders discovered yet.</p>'; },

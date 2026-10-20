@@ -9,6 +9,14 @@ const TRIBE_TOOLS = [
   { k: 'net', name: 'Fishing nets', max: 1, costs: [35], desc: 'Members can fish at the shore, which is faster than picking fruit.' },
 ];
 const TRIBE_GOAL = 2;
+/* a year is four short seasons; winter stops the fruit and the fish, and everyone still has to eat */
+const SEASON_LEN = 60, SEASONS = [
+  { name: 'Spring', icon: '❀', grow: 1.5, fish: 1, yield: 1 },
+  { name: 'Summer', icon: '☀', grow: 1, fish: 1.3, yield: 1 },
+  { name: 'Autumn', icon: '❦', grow: .8, fish: 1, yield: 1.3 },
+  { name: 'Winter', icon: '❄', grow: 0, fish: 0, yield: 1 },
+];
+const PEN_COST = 40, TAME_COST = 15;
 const TribeStage = {
   idx: 2,
   enter() {
@@ -17,7 +25,7 @@ const TribeStage = {
     const sc = this.scene = new THREE.Scene(); sc.fog = new THREE.FogExp2(this.pal.fog, .005);
     this.sky = makeSky(sc, this.pal.skyTop, this.pal.skyBot); this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x3a3020, 1); sc.add(this.hemi);
     this.sun = sunLight(sc, 0xfff2dd, 2.4, 140);
-    const seed = G.seed + 3, r = mulberry32(seed); this.t = 0;
+    const seed = G.seed + 3, r = mulberry32(seed); this.t = 0; this.yearT = 0; this.season = 0;
     const homes = G.mode === 2 ? [{ x: -70, z: 30 }, { x: 70, z: 30 }] : [{ x: 0, z: 30 }];
     const base = r() * TAU, tribeSpots = [0, 1, 2, 3].map(i => { const a = base + i * TAU / 4 + .4, d = 175 + r() * 25; return { x: Math.cos(a) * d, z: Math.sin(a) * d }; });
     this.wonders = wonderSites(r, 5, ['stones', 'arch', 'skytree', 'springs', 'spire', 'ribs', 'floaters', 'shrooms'], 120, 235, [...homes, ...tribeSpots].map(f => ({ ...f, r: 34 })));
@@ -37,14 +45,15 @@ const TribeStage = {
     for (let p = 0; p < G.mode; p++) {
       const P = G.players[p]; if (!P.body || P.body.kind !== 'creature') P.body = starterCreature(P);
       const v = this.makeVillage({ id: 10 + p, x: homes[p].x, z: homes[p].z, owner: p, hue: P.hue, body: P.body, name: P.name });
-      const q = { p, food: 60, tools: { spear: 0, horn: 0, herb: 0, torch: 0, net: 0 }, hutLvl: 1, village: v, spearCd: 0, birthT: 0 };
+      const q = { p, food: 60, tools: { spear: 0, horn: 0, herb: 0, torch: 0, net: 0 }, hutLvl: 1, village: v, spearCd: 0, birthT: 0, pen: 0, hungry: false };
       this.pl.push(q);
       q.chief = this.addUnit({ k: 'player', p }, v.x, v.z - 12, P.body, 1.4); q.chief.isChief = true; this.addHeaddress(q.chief, P.hue2 ?? (P.hue + 150));
       for (let k = 0; k < 4; k++) { const u = this.addUnit({ k: 'player', p }, v.x + rand(-8, 8), v.z + rand(-8, 8), P.body, 1); u.state = 'follow'; }
       for (const pet of (P.pets || [])) { const u = this.addUnit({ k: 'player', p }, v.x + rand(-6, 6), v.z + rand(-6, 6), pet.body, (pet.k || 1) * .8); u.pet = pet.name; u.state = 'follow'; u.maxhp = u.hp = u.hp * 1.6; u.dmg *= 1.4; }
       if ((P.pets || []).length) toastP(p, `Your ${P.pets.map(x => x.name).join(' and ')} allies followed you into the tribal age.`, 'good');
-      Panes[p].build({ eyebrow: 'Stage 3 · Tribe', title: 'The ' + P.name + ' tribe', meters: [{ id: 'chief', label: 'Chief', color: 'var(--membrane)' }, { id: 'vil', label: 'Village', color: 'var(--ochre)' }, { id: 'uni', label: 'Unity', color: 'var(--violet)' }], stats: [{ id: 'food', label: 'Food' }, { id: 'pop', label: 'People' }, { id: 'tools', label: 'Tools' }, { id: 'won', label: 'Wonders' }] });
+      Panes[p].build({ eyebrow: 'Stage 3 · Tribe', title: 'The ' + P.name + ' tribe', meters: [{ id: 'chief', label: 'Chief', color: 'var(--membrane)' }, { id: 'vil', label: 'Village', color: 'var(--ochre)' }, { id: 'uni', label: 'Unity', color: 'var(--violet)' }], stats: [{ id: 'food', label: 'Food' }, { id: 'pop', label: 'People' }, { id: 'tools', label: 'Tools' }, { id: 'won', label: 'Wonders' }, { id: 'season', label: 'Season' }, { id: 'pen', label: 'Pen' }] });
       toastP(p, `Lead your people with your chief. ${KEYLABEL[p].a1} commands whatever you are standing near: fruit, fish, prey, enemies or a rival village. Unite ${TRIBE_GOAL} of the 4 tribes${G.mode === 2 ? ' (an accord with your rival counts as one)' : ''}. Golden beacons mark old places worth leading your people to.`);
+      toastP(p, `Seasons turn every minute. In winter nothing grows and your people eat from your stores, so stock up in autumn. Build a pen at your village, then tame wild animals with ${KEYLABEL[p].a4}: penned animals feed you all year.`);
     }
     this.animalBodies = [genBody(r, { diet: 'herb', details: 0 }), genBody(r, { diet: 'herb', details: 1 })];
     for (let i = 0; i < 16; i++) this.spawnAnimal();
@@ -78,7 +87,7 @@ const TribeStage = {
   addHeaddress(u, hue) { const hg = u.cr.bones[0], r = u.cr.B.sp[0].r; for (let k = 0; k < 5; k++) { const f = new THREE.Mesh(G_CONE(), stdMat(col3(hue + k * 25, .7, .6).getHex())); f.scale.set(r * .12, r * .9, r * .12); f.position.set(-r * .2, r * .9, (k - 2) * r * .25); f.rotation.x = (k - 2) * .25; f.rotation.z = .4; hg.add(f); } },
   side(u) { return u.side; },
   ustats(side, scale) {
-    if (side.k === 'player') { const P = G.players[side.p], q = this.pl && this.pl[side.p], ab = abilities(P.body), st = { hp: (55 + ab.A.health * 22 + ab.vol * 40) * P.mods.hp, bite: (5 + (ab.A.bite + ab.A.strike) * 4) * P.mods.dmg, speed: (5.5 + ab.A.speed * 1.5) * (ab.legs ? 1 : .6) }, t = q ? q.tools : { spear: 0, herb: 0 }; return { hp: (st.hp * .55 + t.herb * 18) * scale, dmg: (st.bite * .6 + t.spear * 5 * P.mods.dmg) * scale, speed: st.speed * .85 }; }
+    if (side.k === 'player') { const P = G.players[side.p], q = this.pl && this.pl[side.p], ab = abilities(P.body), st = { hp: (55 + ab.A.health * 22 + ab.vol * 40) * P.mods.hp, bite: (5 + (ab.A.bite + ab.A.strike) * 4) * P.mods.dmg, speed: (5.5 + ab.A.speed * 1.5) * (ab.legs ? 1 : .6) }, t = q ? q.tools : { spear: 0, herb: 0 }; return { hp: (st.hp * .55 + t.herb * 18) * scale, dmg: (st.bite * .6 + t.spear * 5 * P.mods.dmg) * scale, speed: st.speed * .85 * (P.mods.speed || 1) }; }
     if (side.k === 'wild') return { hp: 70 * scale, dmg: 4 * scale, speed: 9 };
     if (side.k === 'beast') return { hp: 220, dmg: 16, speed: 11 };
     const v = this.villages.find(x => x.id === side.id), tough = v && v.temper === 'proud' ? 1.25 : 1; return { hp: 60 * tough, dmg: 7 * tough, speed: 10.5 };
@@ -98,7 +107,7 @@ const TribeStage = {
   hostile(a, b) {
     const A = a.side, B = b.side; if (a === b) return false;
     if (A.k === 'beast' || B.k === 'beast') return A.k !== B.k;
-    if (A.k === 'wild' || B.k === 'wild') return false;
+    if (A.k === 'wild' || B.k === 'wild' || A.k === 'pen' || B.k === 'pen') return false;
     if (A.k === 'player' && B.k === 'player') return A.p !== B.p && this.pvp && canHarm();
     const pl = A.k === 'player' ? A : B.k === 'player' ? B : null; if (!pl) return false;
     const tr = A.k === 'tribe' ? A : B; const v = this.villages.find(x => x.id === tr.id); if (!v || v.by >= 0) return false; return v.war[pl.p];
@@ -120,7 +129,7 @@ const TribeStage = {
     if (act === 'menu') { this.openVillage(p); return; }
     if (act === 'a2') { for (const u of this.followers(p)) { u.state = 'follow'; u.target = null; } toastP(p, 'Your people rally to you.'); Sfx.click(p); return; }
     if (act === 'a3') { this.throwSpear(q); return; }
-    if (act === 'a4') { const ctx = this.context(q); if (ctx && ctx.kind === 'village') this.perform(q, ctx.v); else toastP(p, 'Stand in a rival village to perform for it.'); return; }
+    if (act === 'a4') { const ctx = this.context(q); if (ctx && ctx.kind === 'village') this.perform(q, ctx.v); else if (ctx && ctx.kind === 'hunt') this.tame(q, ctx.u); else toastP(p, 'Stand in a rival village to perform for it, or next to a wild animal to tame it.'); return; }
     if (act !== 'a1') return;
     const ctx = this.context(q); if (!ctx) { toastP(p, 'Nothing here to command. Walk up to fruit, fish, prey, enemies or a village.'); return; }
     const fl = this.followers(p);
@@ -131,10 +140,28 @@ const TribeStage = {
     else if (ctx.kind === 'home') this.openVillage(p);
     Sfx.click(p);
   },
+  birthCost(p) { return hasFlag(G.players[p], 'clutch') ? 15 : 25; },
+  penned(p) { return this.units.filter(u => !u.dead && u.side.k === 'pen' && u.side.p === p); },
+  penCap(q) { return q.pen * 3; },
+  buildPen(q) {
+    const v = q.village; if (!q.penG) { q.penG = new THREE.Group(); const y = this.T.ground(v.x + 28, v.z); q.penG.position.set(v.x + 28, y, v.z); this.scene.add(q.penG); }
+    const wood = stdMat(0x8a6a48, { roughness: .9 }), n = 10 + q.pen * 4, R = 6 + q.pen * 2; for (const c of [...q.penG.children]) q.penG.remove(c);
+    for (let k = 0; k < n; k++) { const a = k / n * TAU, m = new THREE.Mesh(G_CYL(), wood); m.scale.set(.18, 1.6, .18); m.position.set(Math.cos(a) * R, .8, Math.sin(a) * R); q.penG.add(m); const rail = new THREE.Mesh(G_BOX(), wood); const a2 = (k + .5) / n * TAU; rail.scale.set(.12, .12, R * TAU / n); rail.position.set(Math.cos(a2) * R, 1.2, Math.sin(a2) * R); rail.rotation.y = -a2; q.penG.add(rail); }
+    q.penAt = { x: v.x + 28, z: v.z, r: R - 1.5 };
+  },
+  tame(q, u) {
+    if (!q.pen) { toastP(q.p, 'Build an animal pen at your village first.', 'bad'); return; }
+    if (this.penned(q.p).length >= this.penCap(q)) { toastP(q.p, 'Your pen is full. Expand it at your village.', 'bad'); return; }
+    if (q.food < TAME_COST) { toastP(q.p, `Taming takes ${TAME_COST} food to win it over.`, 'bad'); return; }
+    if (u.side.k !== 'wild' || u.state === 'fight') { toastP(q.p, 'It is too wild right now.', 'bad'); return; }
+    q.food -= TAME_COST; u.side = { k: 'pen', p: q.p }; u.state = 'idle'; u.target = null; u.home = { x: q.penAt.x, z: q.penAt.z }; Sfx.good(q.p);
+    this.fx.burst(u.x, u.cr.head().y + 1, u.z, '#a6d96a', 16, 4, .8); toastP(q.p, 'Tamed. It heads for your pen.', 'good');
+  },
+  get seasonNow() { return SEASONS[this.season]; },
   throwSpear(q) {
     if (!q.tools.spear) { toastP(q.p, 'Make spears at your village first.', 'bad'); return; } if (q.spearCd > 0) return; q.spearCd = 1.4;
     const c = q.chief, y = c.cr.head().y + .5, m = new THREE.Mesh(G_CYL(), stdMat(0xc9a77a)); m.scale.set(.08, 2.4, .08); this.scene.add(m);
-    this.spears.push({ x: c.x, y, z: c.z, vx: Math.cos(c.a) * 38, vz: Math.sin(c.a) * 38, vy: 3, m, life: 1.2, owner: c, dmg: (14 + q.tools.spear * 8) * G.players[q.p].mods.dmg });
+    this.spears.push({ x: c.x, y, z: c.z, vx: Math.cos(c.a) * 38, vz: Math.sin(c.a) * 38, vy: 3, m, life: 1.2, owner: c, dmg: (14 + q.tools.spear * 8) * G.players[q.p].mods.dmg * (hasFlag(G.players[q.p], 'venom') ? 1.25 : 1) });
     Sfx.tone(500, .1, 'triangle', .03, .5, Sfx.pan(q.p));
   },
   perform(q, v) {
@@ -163,8 +190,10 @@ const TribeStage = {
       items: () => [
         ...evolveItems(p),
         { head: true, label: 'People' },
-        { label: 'Raise a new member', value: '25 food', desc: 'They appear at your village.', disabled: q.food < 25 || this.own(p).length > this.cap(q), onSelect: () => { if (q.food < 25 || this.own(p).length > this.cap(q)) return; q.food -= 25; const u = this.addUnit({ k: 'player', p }, q.village.x, q.village.z, G.players[p].body, .7); u.state = 'follow'; Sfx.good(p); } },
+        { label: 'Raise a new member', value: `${this.birthCost(p)} food`, desc: 'They appear at your village.', disabled: q.food < this.birthCost(p) || this.own(p).length > this.cap(q), onSelect: () => { const bc = this.birthCost(p); if (q.food < bc || this.own(p).length > this.cap(q)) return; q.food -= bc; const u = this.addUnit({ k: 'player', p }, q.village.x, q.village.z, G.players[p].body, .7); u.state = 'follow'; Sfx.good(p); } },
         { label: q.hutLvl < 3 ? 'Expand the village' : 'Village fully expanded', value: q.hutLvl < 3 ? [90, 150][q.hutLvl - 1] + ' food' : '', desc: 'Room for 3 more people and a sturdier village.', disabled: q.hutLvl >= 3 || q.food < [90, 150][q.hutLvl - 1], onSelect: () => { const c = [90, 150][q.hutLvl - 1]; if (q.hutLvl >= 3 || q.food < c) return; q.food -= c; q.hutLvl++; q.village.maxhp += 150; q.village.hp += 150; Sfx.good(p); } },
+        q.pen ? { label: `Animal pen · ${this.penned(p).length}/${this.penCap(q)}`, value: `+${(this.penned(p).length * .18 * G.players[p].mods.econ * 60).toFixed(0)}/min`, desc: q.pen < 2 ? `Expand it for ${PEN_COST + 30} food: room for 3 more animals.` : 'Penned animals feed your people all year, winter too.', disabled: q.pen >= 2 || q.food < PEN_COST + 30, onSelect: () => { if (q.pen >= 2 || q.food < PEN_COST + 30) return; q.food -= PEN_COST + 30; q.pen++; this.buildPen(q); Sfx.good(p); } }
+          : { label: 'Build an animal pen', value: `${PEN_COST} food`, desc: `Then stand next to a wild animal and press ${KEYLABEL[p].a4} to tame it for ${TAME_COST} food. Penned animals give food all year, even in winter.`, disabled: q.food < PEN_COST, onSelect: () => { if (q.food < PEN_COST) return; q.food -= PEN_COST; q.pen = 1; this.buildPen(q); Sfx.good(p); toastP(p, `Pen built. Find a wild animal and press ${KEYLABEL[p].a4} next to it.`, 'good'); } },
         { label: 'Recall everyone', desc: 'Bring all your people back to your chief.', onSelect: () => { for (const u of this.followers(p)) { u.state = 'follow'; u.target = null; } }, close: true },
         { head: true, label: 'Tools' },
         ...TRIBE_TOOLS.map(t => { const lv = q.tools[t.k], c = t.costs[lv]; return { label: t.name, value: lv >= t.max ? 'done' : `${lv}/${t.max} · ${c}`, desc: t.desc, disabled: lv >= t.max || q.food < c, onSelect: () => { if (lv >= t.max || q.food < c) return; q.food -= c; q.tools[t.k]++; this.refreshOwn(p); if (t.k === 'torch') q.village.torch = true; Sfx.good(p); } }; }),
@@ -175,6 +204,7 @@ const TribeStage = {
   /* ---------- simulation ---------- */
   update(dt) {
     this.t += dt; const mid = this.pl.reduce((a, q) => ({ x: a.x + q.chief.x / this.pl.length, z: a.z + q.chief.z / this.pl.length }), { x: 0, z: 0 });
+    this.updSeason(dt);
     this.day.update(dt, mid.x, mid.z); this.wfx.update(dt, this.pl.map(q => q.chief)); const night = this.day.isNight;
     const spread = this.pl.length > 1 ? Math.hypot(this.pl[0].chief.x - this.pl[1].chief.x, this.pl[0].chief.z - this.pl[1].chief.z) : 0, ss = clamp(spread / 2 + 80, 90, 230);
     const c = this.sun.shadow.camera; if (Math.abs(c.right - ss) > 5) { c.left = -ss; c.right = ss; c.top = ss; c.bottom = -ss; c.updateProjectionMatrix(); }
@@ -184,9 +214,10 @@ const TribeStage = {
     // deaths
     for (const u of this.units) if (!u.dead && u.hp <= 0) {
       if (u.isChief) continue; u.dead = true; u.cr.dispose(); this.fx.burst(u.x, u.cr.head().y, u.z, '#d9583e', 10, 5, .6, 6);
-      const k = u.killer; if (u.side.k === 'wild' && k && k.side.k === 'player') { const q = this.pl[k.side.p], y = ({ carn: 30, omni: 22, herb: 12 }[G.players[q.p].diet]) * G.players[q.p].mods.econ; q.food += y; this.fx.text(u.x, 3, u.z, '+' + Math.round(y) + ' food', '#a6d96a', q.p); }
+      const k = u.killer; if (u.side.k === 'wild' && k && k.side.k === 'player') { const q = this.pl[k.side.p], y = ({ carn: 30, omni: 22, herb: 12 }[G.players[q.p].diet]) * G.players[q.p].mods.econ * this.seasonNow.yield; q.food += y; this.fx.text(u.x, 3, u.z, '+' + Math.round(y) + ' food', '#a6d96a', q.p); }
       if (u.side.k === 'wild') setTimeout(() => { if (S === this) this.spawnAnimal(); }, 20000);
-      if (u.side.k === 'player') toastP(u.side.p, u.pet ? `Your ${u.pet} companion has fallen.` : 'One of your people has fallen.', 'bad');
+      if (u.side.k === 'player') toastP(u.side.p, u.pet ? `Your ${u.pet} companion has fallen.` : u.starved ? 'One of your people starved.' : 'One of your people has fallen.', 'bad');
+      if (u.side.k === 'pen') toastP(u.side.p, 'One of your penned animals was killed.', 'bad');
     }
     this.units = this.units.filter(u => !u.dead);
     // villages
@@ -195,8 +226,9 @@ const TribeStage = {
     const beasts = this.units.filter(u => u.side.k === 'beast');
     if (night && beasts.length < 2 + G.mode) { const a = rand(0, TAU), u = this.addUnit({ k: 'beast' }, Math.cos(a) * 250, Math.sin(a) * 250, this.beastBody || (this.beastBody = genBody(Math.random, { diet: 'carn', mouth: 'm_maw', segs: 6, details: 2, paint: { h1: 270, h2: 300, h3: 180, l1: .3, pattern: 'bands' } })), 1.5); u.beast = true; }
     if (!night) for (const b of beasts) { b.flee = true; if (Math.hypot(b.x, b.z) > 245) { b.dead = true; b.cr.dispose(); } }
-    for (const b of this.bushes) { b.fruit = Math.min(6, b.fruit + .1 * dt); b.fr.forEach((m, i) => m.visible = i < Math.min(4, Math.floor(b.fruit))); }
-    for (const f of this.fish) { f.stock = Math.min(10, f.stock + .15 * dt); f.ring.scale.setScalar(1 + .15 * Math.sin(this.t * 3 + f.x)); f.ring.material.opacity = f.stock > 1 ? .6 : .15; }
+    const SN = this.seasonNow;
+    for (const b of this.bushes) { b.fruit = Math.min(6, b.fruit + .1 * SN.grow * dt); b.fr.forEach((m, i) => m.visible = i < Math.min(4, Math.floor(b.fruit))); }
+    for (const f of this.fish) { f.stock = Math.min(10, f.stock + .15 * SN.fish * dt); f.ring.scale.setScalar(1 + .15 * Math.sin(this.t * 3 + f.x)); f.ring.material.opacity = f.stock > 1 ? .6 : .15; }
     this.fx.update(dt);
     Disc.update(dt, p => { const q = this.pl[p]; return q && q.chief && !q.chief.downT ? q.chief : null; });
     for (const q of this.pl) if (this.united(q.p) >= TRIBE_GOAL && !Flow.ready[q.p]) { const con = this.villages.filter(v => v.by === q.p && v.how === 'conquered').length, al = this.villages.filter(v => v.by === q.p && v.how === 'allied').length; playerDone(q.p, con > al ? 'aggr' : al > con ? 'social' : 'mixed', [`Conquered ${con} tribe${con === 1 ? '' : 's'}, allied with ${al}${G.accord ? ', and stood in accord with your rival' : ''}.`, 'Your tribe founds the first city.']); }
@@ -218,13 +250,21 @@ const TribeStage = {
     if (c.hp <= 0) { if (!c.downT) { Menus[q.p].close(); c.downT = 6; c.cr.setVisible(false); toastP(q.p, 'Your chief is wounded and carried home.', 'bad'); Sfx.bad(q.p); } c.downT -= dt; if (c.downT <= 0) { c.downT = 0; c.hp = c.maxhp * .6; c.x = q.village.x; c.z = q.village.z - 12; c.cr.setVisible(true); c.cr.init = false; } this.hud(q); return; }
     c.cd -= dt; c.flash -= dt; c.act -= dt; c.manual = (c.manual || 0) - dt;
     const dir = Menus[q.p].isOpen ? { x: 0, z: 0, m: 0 } : dirOf(q.p);
-    if (dir.m) { c.state = 'idle'; c.target = null; c.a = lerpAng(c.a, Math.atan2(dir.z, dir.x), dt * 9); const sp = c.speed * 1.15 * (this.T.isWater(c.x, c.z) ? .55 : 1); c.x += Math.cos(c.a) * sp * dt; c.z += Math.sin(c.a) * sp * dt; const B = this.T.B * .8; c.x = clamp(c.x, -B, B); c.z = clamp(c.z, -B, B); }
+    if (dir.m) { c.state = 'idle'; c.target = null; c.a = lerpAng(c.a, Math.atan2(dir.z, dir.x), dt * 9); const sp = c.speed * 1.15 * (this.T.isWater(c.x, c.z) && !hasFlag(P, 'water') ? .55 : 1) * (hasFlag(P, 'adren') && c.hp < c.maxhp / 3 ? 1.4 : 1); c.x += Math.cos(c.a) * sp * dt; c.z += Math.sin(c.a) * sp * dt; const B = this.T.B * .8; c.x = clamp(c.x, -B, B); c.z = clamp(c.z, -B, B); }
     if (c.state === 'fight' && c.target && !c.target.dead && !dir.m) this.fightStep(c, c.target, dt);
     else { c.cr.st.bite = c.act > 0 ? 1 : 0; c.cr.update(dt, c.x, c.z, c.a, this.H); }
     if (c.target && c.target.dead) { c.state = 'idle'; c.target = null; }
     // chief defends itself
     if (!dir.m && c.state !== 'fight') { const e = this.nearest(c, u => this.hostile(c, u), 9); if (e) { c.state = 'fight'; c.target = e; } }
-    if (Math.hypot(c.x - q.village.x, c.z - q.village.z) < 30) c.hp = Math.min(c.maxhp, c.hp + (2 + q.tools.herb * 3) * dt); else c.hp = Math.min(c.maxhp, c.hp + .4 * dt);
+    const rg = hasFlag(P, 'regen') ? 2 : 1; if (Math.hypot(c.x - q.village.x, c.z - q.village.z) < 30) c.hp = Math.min(c.maxhp, c.hp + (2 + q.tools.herb * 3) * rg * dt); else c.hp = Math.min(c.maxhp, c.hp + .4 * rg * dt);
+    /* penned animals feed you all year; in winter everyone eats from your stores */
+    q.food += this.penned(q.p).length * .18 * P.mods.econ * dt;
+    if (this.season === 3) {
+      const eat = this.own(q.p).length * .07 * (hasFlag(P, 'fat') ? .6 : 1); q.food -= eat * dt;
+      if (q.food <= 0) { q.food = 0; if (!q.hungry) { q.hungry = true; toastP(q.p, 'Your stores are empty. Your people are starving until spring, or until you find food.', 'bad'); Sfx.bad(q.p); }
+        for (const u of this.followers(q.p)) { if (u.pet) continue; u.hp -= (hasFlag(P, 'cold') ? 1 : 2) * dt; if (u.hp <= 0) u.starved = true; } }
+      else q.hungry = false;
+    } else q.hungry = false;
     if (q.performing) { const v = q.performing; if (Math.hypot(c.x - v.x, c.z - v.z) > 45 || v.by >= 0) { q.performing = null; for (const u of this.followers(q.p)) if (u.state === 'perform') u.state = 'follow'; } else { v.rel[q.p] = Math.min(100, v.rel[q.p] + (.6 + q.tools.horn * .4) * P.mods.social * dt); c.cr.st.sing = true; } } else c.cr.st.sing = false;
     // births keep a dwindling tribe alive
     q.birthT += dt; if (q.birthT > 30 && this.own(q.p).length < 3) { q.birthT = 0; const u = this.addUnit({ k: 'player', p: q.p }, q.village.x, q.village.z, P.body, 1); u.state = 'follow'; toastP(q.p, 'A child is born in your village.'); }
@@ -293,6 +333,11 @@ const TribeStage = {
       u.state = 'idle'; u.wa += rand(-1, 1) * dt; if (Math.hypot(u.x - u.home.x, u.z - u.home.z) > 40) u.wa = Math.atan2(u.home.z - u.z, u.home.x - u.x);
       this.moveTo(u, u.x + Math.cos(u.wa) * 5, u.z + Math.sin(u.wa) * 5, dt, .35); return;
     }
+    if (S2.k === 'pen') {
+      const P0 = this.pl[S2.p], h = P0 && P0.penAt; if (!h) return; u.state = 'idle';
+      u.wa += rand(-1, 1) * dt; const d = Math.hypot(u.x - h.x, u.z - h.z); if (d > h.r) u.wa = Math.atan2(h.z - u.z, h.x - u.x);
+      this.moveTo(u, u.x + Math.cos(u.wa) * 3, u.z + Math.sin(u.wa) * 3, dt, d > h.r + 6 ? 1 : .25); return;
+    }
     if (S2.k === 'beast') {
       if (u.flee) { this.moveTo(u, u.x * 1.2, u.z * 1.2, dt, 1); return; }
       let t = u.target; if (!t || t.dead || Math.random() < dt * .3) { t = null; let bd = 70; for (const o of this.units) { if (o.dead || o.side.k === 'beast') continue; const ov = this.villageOf(o), lit = (ov && ov.torch && Math.hypot(o.x - ov.x, o.z - ov.z) < 50) || (o.side.k === 'player' && this.pl[o.side.p].tools.torch && o.isChief); if (lit) continue; const d = Math.hypot(o.x - u.x, o.z - u.z); if (d < bd) { bd = d; t = o; } } u.target = t; }
@@ -306,8 +351,8 @@ const TribeStage = {
       case 'fight': { const t = u.target; if (!t || t.dead || t.hp <= 0 || Math.hypot(t.x - u.x, t.z - u.z) > 60) { const pv = u.prev || { state: S2.k === 'player' ? 'follow' : 'idle' }; u.state = pv.state === 'fight' ? (S2.k === 'player' ? 'follow' : 'idle') : pv.state; u.spot = pv.spot; u.target = null; u.prev = null; break; } this.fightStep(u, t, dt); return; }
       case 'follow': { const c = q.chief, fl = this.followers(S2.p), i = fl.indexOf(u), row = Math.floor(i / 4), col = i % 4, fa = c.a + Math.PI, fx = c.x + Math.cos(fa) * (5 + row * 3.5) + Math.cos(fa + Math.PI / 2) * (col - 1.5) * 3, fz = c.z + Math.sin(fa) * (5 + row * 3.5) + Math.sin(fa + Math.PI / 2) * (col - 1.5) * 3; this.moveTo(u, fx, fz, dt, Math.hypot(fx - u.x, fz - u.z) > 6 ? 1.15 : .6); return; }
       case 'gather': case 'fish': {
-        if (u.carry >= 6) { if (this.moveTo(u, home.x, home.z, dt) || Math.hypot(u.x - home.x, u.z - home.z) < 12) { const k = u.state === 'fish' ? 1.3 : ({ herb: 1.3, omni: 1.1, carn: .85 }[G.players[S2.p].diet]); const y = u.carry * k * G.players[S2.p].mods.econ; q.food += y; u.carry = 0; this.fx.text(u.x, 3, u.z, '+' + Math.round(y), '#a6d96a', S2.p); } return; }
-        if (u.state === 'fish') { const f = u.spot; if (!f) { u.state = 'follow'; return; } if (Math.hypot(f.x - u.x, f.z - u.z) > 3) this.moveTo(u, f.x + Math.cos(u.wa) * 2, f.z + Math.sin(u.wa) * 2, dt); else { u.cr.update(dt, u.x, u.z, u.a, this.H); u.pick = (u.pick || 0) + dt; if (u.pick > .5 && f.stock >= 1) { u.pick = 0; f.stock--; u.carry++; } } return; }
+        if (u.carry >= 6) { if (this.moveTo(u, home.x, home.z, dt) || Math.hypot(u.x - home.x, u.z - home.z) < 12) { const k = (u.state === 'fish' ? 1.3 : ({ herb: 1.3, omni: 1.1, carn: .85 }[G.players[S2.p].diet])) * this.seasonNow.yield; const y = u.carry * k * G.players[S2.p].mods.econ; q.food += y; u.carry = 0; this.fx.text(u.x, 3, u.z, '+' + Math.round(y), '#a6d96a', S2.p); } return; }
+        if (u.state === 'fish') { const f = u.spot; if (!f) { u.state = 'follow'; return; } if (Math.hypot(f.x - u.x, f.z - u.z) > 3) this.moveTo(u, f.x + Math.cos(u.wa) * 2, f.z + Math.sin(u.wa) * 2, dt); else { u.cr.update(dt, u.x, u.z, u.a, this.H); u.pick = (u.pick || 0) + dt * (hasFlag(G.players[S2.p], 'water') ? 1.5 : 1); if (u.pick > .5 && f.stock >= 1) { u.pick = 0; f.stock--; u.carry++; } } return; }
         let b = u.target; if (!b || b.fruit < 1) { b = null; let bd = 1e9; const from = u.spot || u; for (const o of this.bushes) { if (o.fruit < 1) continue; const d = Math.hypot(o.x - from.x, o.z - from.z); if (d < bd && d < 80) { bd = d; b = o; } } u.target = b; }
         if (!b) { u.state = 'follow'; return; }
         if (Math.hypot(b.x - u.x, b.z - u.z) > 3) this.moveTo(u, b.x, b.z, dt); else { u.cr.update(dt, u.x, u.z, u.a, this.H); u.pick = (u.pick || 0) + dt; if (u.pick > .6) { u.pick = 0; b.fruit -= 1; u.carry++; } }
@@ -318,9 +363,48 @@ const TribeStage = {
       default: { u.cr.st.sing = false; u.cr.st.dance = false; if (S2.k === 'player') { u.state = 'follow'; return; } u.wa += rand(-1, 1) * dt; const d = Math.hypot(u.x - home.x, u.z - home.z); if (d > 20) u.wa = Math.atan2(home.z - u.z, home.x - u.x); this.moveTo(u, u.x + Math.cos(u.wa) * 5, u.z + Math.sin(u.wa) * 5, dt, d > 30 ? 1 : .3); }
     }
   },
+  updSeason(dt) {
+    this.yearT += dt; const sn = Math.floor(this.yearT / SEASON_LEN) % 4;
+    if (sn !== this.season) {
+      this.season = sn; const S0 = SEASONS[sn];
+      if (sn === 2) toastAll('Autumn. Harvests and hunts give more now. Winter comes in a minute: fill your stores.', 'warn');
+      else if (sn === 3) { toastAll('Winter. Nothing grows and the fish are under ice. Your people eat from your stores.', 'warn'); for (const q of this.pl) Sfx.bad(q.p); }
+      else toastAll(`${S0.name} has come.`, sn === 0 ? 'good' : '');
+    }
+    /* winter: whiter fog and snow drifting round each chief */
+    const w = this.season === 3 ? 1 : this.season === 2 && this.yearT % SEASON_LEN > SEASON_LEN * .8 ? .3 : 0;
+    this.winterK = lerp(this.winterK || 0, w, Math.min(1, dt * .5));
+    if (this.winterK > .2) for (const q of this.pl) if (Math.random() < dt * 30 * this.winterK) { const c = q.chief; this.fx.burst(c.x + rand(-40, 40), c.cr.head().y + rand(10, 22), c.z + rand(-40, 30), '#ffffff', 1, .5, 3, 3); }
+  },
+  calm(p) { const q = this.pl[p]; return q && !q.chief.downT && q.chief.state !== 'fight' && !this.units.some(u => u.state === 'raid' && u.spot === q.village); },
+  memoryBonus(p) { this.pl[p].food += 20; return '+20 food.'; },
+  onGene(p) { this.refreshOwn(p); const q = this.pl[p]; if (q && q.chief) { const st = this.ustats(q.chief.side, q.chief.scale); q.chief.speed = st.speed; } },
+  chronicle: [
+    { id: 'strangers', title: 'Strangers at the fire', text: 'A ragged little band of wanderers has walked into your village. They ask to stay.',
+      choices: [
+        { label: 'Welcome them', desc: 'Two new people join you, if there is room. Feeding them costs 20 food.', ok(p) { return this.pl[p].food >= 20; }, go(p) { const q = this.pl[p]; q.food -= 20; let n = 0; for (let i = 0; i < 2; i++) if (this.own(p).length <= this.cap(q)) { const u = this.addUnit({ k: 'player', p }, q.village.x, q.village.z, G.players[p].body, .9); u.state = 'follow'; n++; } return n ? `${n} wanderer${n === 1 ? '' : 's'} joined your tribe.` : 'There was no room, so they moved on with your food.'; } },
+        { label: 'Trade with them and send them on', desc: '+25 food for what they carry.', go(p) { this.pl[p].food += 25; return '+25 food.'; } }] },
+    { id: 'sickness', title: 'A cough in the huts', text: 'A sickness is moving from hut to hut. People are lying down and not getting up.',
+      choices: [
+        { label: 'Brew your healing herbs', desc: 'Needs healing herbs. Everyone is healed.', ok(p) { return this.pl[p].tools.herb > 0; }, go(p) { for (const u of this.own(p)) u.hp = u.maxhp; return 'The herbs work. Everyone recovers.'; } },
+        { label: 'Let it run its course', desc: 'Everyone drops to half health.', go(p) { for (const u of this.own(p)) u.hp = Math.min(u.hp, u.maxhp * .5); return 'It passes, slowly.'; } },
+        { label: 'Send the sick away', desc: 'One of your people leaves. Nobody else gets ill.', go(p) { const f = this.followers(p).filter(u => !u.pet); if (f.length > 1) { f[f.length - 1].hp = 0; } return 'A hard choice.'; } }] },
+    { id: 'comet', title: 'A fire in the sky', text: 'A burning star crosses the night sky. Your people want to know what it means.',
+      choices: [
+        { label: 'It means war', desc: 'Your people make spears in a frenzy: +1 spears.', go(p) { const q = this.pl[p]; if (q.tools.spear < 3) { q.tools.spear++; this.refreshOwn(p); return '+1 spears.'; } q.food += 30; return 'Your spears are already the best. +30 food.'; } },
+        { label: 'It means peace', desc: 'Your storytellers carry it to every tribe: +12 friendship with all of them.', go(p) { for (const v of this.villages) if (v.owner < 0 && v.by < 0 && !v.war[p]) v.rel[p] = Math.min(99, v.rel[p] + 12 * G.players[p].mods.social); return 'Every tribe heard your story.'; } }] },
+    { id: 'herd', title: 'The great herd', text: 'A huge herd is crossing the plain, thousands strong, heading for somewhere only they know.',
+      choices: [
+        { label: 'Hunt the stragglers', desc: '+50 food, more for meat-eaters.', go(p) { const y = Math.round(({ carn: 70, omni: 55, herb: 40 }[G.players[p].diet] || 50) * G.players[p].mods.econ); this.pl[p].food += y; return `+${y} food.`; } },
+        { label: 'Follow them', desc: 'They lead you to an old place. +20 food, and a wonder is revealed.', go(p) { const q = this.pl[p], c = q.chief; q.food += 20; const w = Disc.list.filter(x => !x.found[p]).sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0]; return w ? `+20 food. They pass ${w.name}, ${Math.round(Math.hypot(w.x - c.x, w.z - c.z))} m away.` : '+20 food.'; } }] },
+    { id: 'duel', title: 'A challenge', when(p) { return G.mode === 2 && !G.accord; }, text: p => `P${other(p) + 1}'s chief has sent a runner: settle things man to man, winner takes 40 food.`,
+      choices: [
+        { label: 'Accept the duel', desc: 'Your chief\'s strength and health decide it. Win or lose 40 food.', go(p) { const a = this.pl[p].chief, b = this.pl[other(p)].chief, win = Math.random() < clamp(.5 + (a.dmg * a.maxhp - b.dmg * b.maxhp) / (a.dmg * a.maxhp + b.dmg * b.maxhp), .2, .8), w = win ? p : other(p), l = other(w), amt = Math.min(40, Math.floor(this.pl[l].food)); this.pl[l].food -= amt; this.pl[w].food += amt; toastP(other(p), win ? `P${p + 1} won the duel and took ${amt} food.` : `Your chief won the duel. +${amt} food.`, win ? 'bad' : 'good'); return win ? `Your chief won. +${amt} food.` : `Your chief lost. -${amt} food.`; } },
+        { label: 'Refuse', desc: 'No risk. Your people grumble.', go() { return 'Nothing happens.'; } }] },
+  ],
   /* ---------- view ---------- */
   camFor(i, cam, dt) { const q = this.pl[i]; if (!q) return; const c = q.chief, y = c.cr.head().y, k = dt ? Math.min(1, dt * 4) : 1; editorView(cam, i, false); _tv.set(c.x, y + 17, c.z + 23); cam.position.lerp(_tv, k); cam.lookAt(cam.position.x, cam.position.y - 17, cam.position.z - 30); },
-  beforeRender(i, cam) { const q = this.pl[i]; if (q) this.T.clearView(cam, q.chief.x, 0, q.chief.z); this.wfx.beforeRender(cam); const P = G.players[i], q2 = this.pl[i]; this.scene.fog.density = this.day.isNight ? (q2 && q2.tools.torch ? .009 : .014) : .005; },
+  beforeRender(i, cam) { const q = this.pl[i]; if (q) this.T.clearView(cam, q.chief.x, 0, q.chief.z); this.wfx.beforeRender(cam); const P = G.players[i], q2 = this.pl[i]; const ne = hasFlag(P, 'night'); this.scene.fog.density = (this.day.isNight && !ne ? (q2 && q2.tools.torch ? .009 : .014) : .005) * (hasFlag(P, 'eyes') ? .75 : 1) * (1 + (this.winterK || 0) * .6); },
   labels(i) {
     const pane = Panes[i], q = this.pl[i]; if (!q) return;
     for (const v of this.villages) { const c = q.chief; if (Math.hypot(v.x - c.x, v.z - c.z) > 140) continue; const s = project(_kv.set(v.x, this.T.ground(v.x, v.z) + 12, v.z), i); if (!s) continue;
@@ -335,9 +419,10 @@ const TribeStage = {
     const pane = Panes[q.p], c = q.chief, ctx = this.context(q), t = q.tools;
     pane.meter('chief', c.hp, c.maxhp); pane.meter('vil', q.village.hp, q.village.maxhp); pane.meter('uni', this.united(q.p), TRIBE_GOAL, `${this.united(q.p)} of ${TRIBE_GOAL} tribes`);
     pane.stat('food', Math.floor(q.food)); pane.stat('pop', `${this.own(q.p).length}/${this.cap(q) + 1}`); pane.stat('tools', `${t.spear}⚔ ${t.horn}♪ ${t.herb}+`); pane.stat('won', `${Disc.count(q.p)}/${Disc.list.length}`);
+    const SN = this.seasonNow, left = Math.ceil(SEASON_LEN - this.yearT % SEASON_LEN); pane.stat('season', SN.name); pane.stat('pen', q.pen ? `${this.penned(q.p).length}/${this.penCap(q)}` : 'none');
     const lab = !ctx ? 'Command' : { village: 'Visit tribe', hunt: 'Hunt', attack: 'Attack', fish: 'Fish here', gather: 'Gather here', home: 'Village' }[ctx.kind];
-    pane.acts([{ act: 'a1', label: lab, off: !ctx, hot: !!ctx }, { act: 'a2', label: 'Rally' }, { act: 'a3', label: 'Throw spear', off: !t.spear || q.spearCd > 0 }, { act: 'a4', label: 'Perform', off: !(ctx && ctx.kind === 'village') || !t.horn }, { act: 'menu', label: 'Village' }]);
-    let pr = ''; if (c.downT > 0) pr = 'Your chief is recovering…'; else if (q.performing) pr = `Performing for the ${q.performing.name}: ${Math.round(q.performing.rel[q.p])}%`; else if (this.day.isNight && !t.torch) pr = 'Night: beasts are out. Torches keep them away.'; pane.prompt(pr);
+    pane.acts([{ act: 'a1', label: lab, off: !ctx, hot: !!ctx }, { act: 'a2', label: 'Rally' }, { act: 'a3', label: 'Throw spear', off: !t.spear || q.spearCd > 0 }, ctx && ctx.kind === 'hunt' ? { act: 'a4', label: `Tame ${TAME_COST}`, off: !q.pen || q.food < TAME_COST, hot: !!q.pen && q.food >= TAME_COST } : { act: 'a4', label: 'Perform', off: !(ctx && ctx.kind === 'village') || !t.horn }, { act: 'menu', label: 'Village' }]);
+    let pr = ''; if (c.downT > 0) pr = 'Your chief is recovering…'; else if (q.performing) pr = `Performing for the ${q.performing.name}: ${Math.round(q.performing.rel[q.p])}%`; else if (q.hungry) pr = 'Starving: find food or wait for spring. Penned animals feed you in winter.'; else if (this.season === 3) pr = `Winter for ${left}s more: your people eat ${(this.own(q.p).length * .07 * (hasFlag(G.players[q.p], 'fat') ? .6 : 1) * 60).toFixed(0)} food a minute from your stores.`; else if (this.season === 2 && this.yearT % SEASON_LEN > SEASON_LEN * .6) pr = `Winter in ${left}s. Fill your stores.`; else if (this.day.isNight && !t.torch) pr = 'Night: beasts are out. Torches keep them away.'; pane.prompt(pr);
   },
   exit() {},
 };

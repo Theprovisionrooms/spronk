@@ -41,6 +41,10 @@ const ANOMALIES = [
     a: { label: 'Search the wrecks', desc: '+1 hull level and repairs.', go: (st, p) => { const e = st.E(p), q = st.pl[p]; if (e.up.hull < 3) e.up.hull++; else e.credits += 120; q.hp = st.maxHull(p); return 'Your ship is patched with ancient plating.'; } },
     b: { label: 'Salvage the guns', desc: '+1 weapons level.', go: (st, p) => { const e = st.E(p); if (e.up.weapons < 3) { e.up.weapons++; return 'Weapons upgraded.'; } e.credits += 120; return '+120 credits.'; } } },
 ];
+/* alien life to survey: deeper scans find stranger things */
+const LIFE_ODDS = { jungle: .85, ocean: .75, rock: .3, ice: .35, lava: .2, gas: .15 };
+const LIFE_FORMS = [['microbial mats', 1], ['drifting plankton', 1], ['grazing herds', 2], ['walking forests', 2], ['pack hunters', 2], ['floating jellies', 3], ['thinking reefs', 3], ['singing giants', 3]];
+const XENO_DRAFT = 4, TERRAFORM_COST = 250;
 const _sv = new THREE.Vector3(), _sv2 = new THREE.Vector3();
 const SpaceStage = {
   idx: 4,
@@ -52,7 +56,7 @@ const SpaceStage = {
     const seed = G.seed + 5, r = mulberry32(seed); this.t = 0; this.victory = false;
     // stars on three spiral arms, joined so every star is a short hop from another
     const stars = [{ id: 0, x: 0, z: 0, y: 0, core: true, name: 'Galactic Core', planets: [], owner: -1, known: [true, true], visited: [false, false], cls: STAR_CLASSES[0] }];
-    const mk = (x, z) => { const cls = STAR_CLASSES[Math.floor(r() * STAR_CLASSES.length)], np = 1 + Math.floor(r() * 4), planets = []; for (let i = 0; i < np; i++) { const kind = ['rock', 'ocean', 'ice', 'lava', 'gas', 'jungle'][Math.floor(r() * 6)], q = r(); planets.push({ kind, T: kind === 'gas' || kind === 'lava' ? -1 : q < .4 ? 0 : 1, col: null }); } return { id: stars.length, x, z, y: (r() - .5) * 30, name: makeName(r, 2) + (r() < .3 ? ' ' + ['Prime', 'Major', 'Minor', 'Reach'][Math.floor(r() * 4)] : ''), cls, planets, owner: -1, known: [false, false], visited: [false, false] }; };
+    const mk = (x, z) => { const cls = STAR_CLASSES[Math.floor(r() * STAR_CLASSES.length)], np = 1 + Math.floor(r() * 4), planets = []; for (let i = 0; i < np; i++) { const kind = ['rock', 'ocean', 'ice', 'lava', 'gas', 'jungle'][Math.floor(r() * 6)], q = r(); let life = null; if (r() < LIFE_ODDS[kind]) { const f = LIFE_FORMS[Math.floor(r() * LIFE_FORMS.length)]; life = { name: makeName(r, 2), form: f[0], depth: f[1], done: [false, false] }; } planets.push({ kind, T: kind === 'gas' || kind === 'lava' ? -1 : q < .4 ? 0 : 1, col: null, life }); } return { id: stars.length, x, z, y: (r() - .5) * 30, name: makeName(r, 2) + (r() < .3 ? ' ' + ['Prime', 'Major', 'Minor', 'Reach'][Math.floor(r() * 4)] : ''), cls, planets, owner: -1, known: [false, false], visited: [false, false] }; };
     for (let k = 0; k < 9000 && stars.length < 96; k++) { const arm = Math.floor(r() * 3), d = 320 + Math.pow(r(), .85) * 1350, a = arm * TAU / 3 + d * .0034 + (r() - .5) * .75, x = Math.cos(a) * d, z = Math.sin(a) * d; if (stars.some(s => Math.hypot(s.x - x, s.z - z) < 100)) continue; stars.push(mk(x, z)); }
     stars.forEach((s, i) => s.id = i); this.stars = stars;
     const body = stars.filter(s => !s.core), outer = body.filter(s => Math.hypot(s.x, s.z) > 900), homes = [];
@@ -61,12 +65,13 @@ const SpaceStage = {
     this.emps = [];
     for (let p = 0; p < G.mode; p++) {
       const P = G.players[p], h = homes[p]; h.name = P.name + ' Prime'; h.owner = p; h.home = true; h.planets[0] = { kind: 'jungle', T: 1, col: { level: 2 }, homeworld: true };
-      this.emps.push({ id: p, player: true, p, name: P.name, hue: P.hue, alive: true, home: h, credits: 400, relics: 0, up: { engine: 1, hull: 1, weapons: 1, scanner: 1 }, stat: { won: 0, colonized: 0, allied: 0, wars: 0 } });
+      this.emps.push({ id: p, player: true, p, name: P.name, hue: P.hue, alive: true, home: h, credits: 400, relics: 0, xeno: 0, up: { engine: P.lore && P.lore.rocket ? 2 : 1, hull: 1, weapons: 1, scanner: 1 }, stat: { won: 0, colonized: 0, allied: 0, wars: 0, adapted: 0 } });
     }
     const personas = Object.keys(PERSONAS).sort(() => r() - .5);
     for (let i = 0; i < 4; i++) {
       const id = G.mode + i, h = homes[id], persona = personas[i];
       const rel = [0, 1].slice(0, G.mode).map(p => { const P = G.players[p]; const base = persona === 'warlike' ? 12 * styleCount(P, 'aggr') - 6 * styleCount(P, 'social') : persona === 'zealot' ? 12 * styleCount(P, 'social') - 6 * styleCount(P, 'aggr') : persona === 'trader' ? 10 * styleCount(P, 'mixed') + (P.mods.econ > 1.15 ? 10 : 0) : 8; return Math.round(clamp(base + (P.mods.social - 1) * 50, -40, 55)); });
+      for (let p = 0; p < G.mode; p++) if (G.players[p].lore && G.players[p].lore.answered) rel[p] = Math.min(70, rel[p] + 20);
       const e = { id, player: false, name: makeName(r, 2) + ' ' + ['Hegemony', 'Compact', 'Choir', 'Collective', 'Dominion', 'Accord'][Math.floor(r() * 6)], hue: (G.players[0].hue + 50 + i * 75) % 360, persona, rel, war: [false, false], pact: [false, false], ally: [false, false], contact: [false, false], alive: true, power: 10, think: 10 + i * 3, home: h, relic: i < 3, raidT: [rand(90, 140), rand(90, 140)] };
       this.emps.push(e); h.owner = id; h.home = true; h.planets[0] = { kind: 'rock', T: 1, col: { level: 2 }, homeworld: true };
       body.filter(s => s.owner < 0 && Math.hypot(s.x - h.x, s.z - h.z) < 380).sort((a, b) => Math.hypot(a.x - h.x, a.z - h.z) - Math.hypot(b.x - h.x, b.z - h.z)).slice(0, 3 + Math.floor(r() * 2)).forEach(s => this.claim(s, id));
@@ -77,6 +82,8 @@ const SpaceStage = {
     this.relicSites = spread(free().filter(s => Math.hypot(s.x, s.z) < 1250), 5, 420).map((s, i) => { s.relic = { s, guard: i < 2 ? 220 + i * 120 : 0, taken: false, known: [false, false] }; return s.relic; });
     spread(free(), ANOMALIES.length, 300).forEach((s, i) => { s.anomaly = { ...ANOMALIES[i], done: [false, false] }; });
     this.relicTotal = this.relicSites.length + this.emps.filter(e => !e.player && e.relic).length;
+    /* a few hot blue stars are near the end of their lives: one will go supernova every few minutes */
+    body.filter(s => !s.home && !s.relic && !s.anomaly && s.cls === STAR_CLASSES[0]).sort(() => r() - .5).slice(0, 4).forEach(s => s.unstable = true); this.novaT = 260;
     for (const s of stars) for (let p = 0; p < G.mode; p++) if (Math.hypot(s.x - this.emps[p].home.x, s.z - this.emps[p].home.z) < 260) s.known[p] = true;
     // discoveries: anomalies and ruins both count as the galaxy's wonders
     Disc.unit = 'ly';
@@ -92,10 +99,13 @@ const SpaceStage = {
       const pm = []; for (let k = 0; k < 4; k++) { const m = new THREE.Mesh(G_SPH(), stdMat(0xffffff)); m.visible = false; sc.add(m); pm.push(m); }
       const q = { p, x: h.x + 30, z: h.z, y: h.y, vx: 0, vz: 0, a: 0, hp: 0, g, orbit: h, battle: null, planetMeshes: pm, compass: 0, trailT: 0 };
       this.pl.push(q); q.hp = this.maxHull(p);
-      Panes[p].build({ eyebrow: 'Stage 5 · Space', title: P.name + ' Voyagers', meters: [{ id: 'hull', label: 'Ship hull', color: 'var(--bio)' }, { id: 'rel', label: 'Relics', color: 'var(--ochre)' }], stats: [{ id: 'cr', label: 'Credits' }, { id: 'col', label: 'Colonies' }, { id: 'ex', label: 'Explored' }, { id: 'won', label: 'Wonders' }] });
+      Panes[p].build({ eyebrow: 'Stage 5 · Space', title: P.name + ' Voyagers', meters: [{ id: 'hull', label: 'Ship hull', color: 'var(--bio)' }, { id: 'rel', label: 'Relics', color: 'var(--ochre)' }], stats: [{ id: 'cr', label: 'Credits' }, { id: 'col', label: 'Colonies' }, { id: 'ex', label: 'Explored' }, { id: 'won', label: 'Wonders' }, { id: 'xe', label: 'Life' }, { id: 'gen', label: 'Genes' }] });
       const L = KEYLABEL[p];
       toastP(p, `Fly with ${G.mode === 2 ? L.move : 'the arrows'}: up is always up the screen, hold ${L.a3} to boost. At a star, ${L.a1} opens the system. ${L.back} points your compass at something worth the trip.`);
       toastP(p, `The galactic core is sealed. It opens for a species carrying ${this.need(p)} Relics of the First Ones. Find them in old ruins, or win them from the empires.`);
+      toastP(p, `Survey alien life at any star (${L.a1}): every ${XENO_DRAFT} new species you catalogue, their genes offer you a mutation. Your tolerance genes let you settle worlds others cannot.`);
+      if (P.lore && P.lore.answered) toastP(p, 'Long ago you answered a signal from the stars. The empires out here already know your name, and like you for it.', 'good');
+      if (P.lore && P.lore.rocket) toastP(p, 'Your inventor\'s rocket engines power your first starship: engines start at level 2.', 'good');
     }
     this.fx = new FX3(sc, 6);
   },
@@ -144,17 +154,57 @@ const SpaceStage = {
   need(p) { return G.mode === 1 ? 5 : G.accord ? 6 : 4; },
   relicsFor(p) { return G.accord && G.mode === 2 ? this.emps[0].relics + this.emps[1].relics : this.E(p).relics; },
   maxHull(p) { return SHIP_UP.hull.val[this.E(p).up.hull] * G.players[p].mods.hp; },
-  speed(p) { return SHIP_UP.engine.val[this.E(p).up.engine]; },
-  scan(p) { return SHIP_UP.scanner.val[this.E(p).up.scanner]; },
+  speed(p) { return SHIP_UP.engine.val[this.E(p).up.engine] * (G.players[p].mods.speed || 1); },
+  scan(p) { return SHIP_UP.scanner.val[this.E(p).up.scanner] * (hasFlag(G.players[p], 'eyes') ? 1.25 : 1); },
   allies(p) { return this.emps.filter(e => !e.player && e.alive && e.ally[p]); },
-  dps(p) { return SHIP_UP.weapons.val[this.E(p).up.weapons] * G.players[p].mods.dmg * (1 + .3 * this.allies(p).length + (G.accord && G.mode === 2 ? .25 : 0)); },
+  dps(p) { return SHIP_UP.weapons.val[this.E(p).up.weapons] * G.players[p].mods.dmg * (hasFlag(G.players[p], 'venom') ? 1.1 : 1) * (1 + .3 * this.allies(p).length + (G.accord && G.mode === 2 ? .25 : 0)); },
   colonies(p) { const out = []; for (const s of this.stars) if (s.owner === p) for (const pl of s.planets) if (pl.col) out.push({ s, pl }); return out; },
   income(p) { let c = 0; for (const { pl } of this.colonies(p)) c += pl.col.level * 1.1; const pacts = this.emps.filter(x => !x.player && x.alive && x.pact[p]).length; return c * G.players[p].mods.econ + pacts * 2 + (G.accord && G.mode === 2 ? 1 : 0); },
   claim(s, id) { s.owner = id; const best = s.planets.find(p => p.T >= 1) || s.planets.find(p => p.T >= 0); if (best) best.col = { level: 1 }; if (this.terr) this.paintAll(); },
   freeWorld(p, from) { let best = null, bd = 1e9; for (const s of this.stars) { if (s.core || (s.owner >= 0 && s.owner !== p)) continue; const pl = s.planets.find(x => x.T >= 1 && !x.col); if (!pl) continue; const d = Math.hypot(s.x - from.x, s.z - from.z); if (d < bd) { bd = d; best = { s, pl }; } } return best; },
+  /* can this species live on this world? tolerance genes from long ago open worlds nobody else can use */
+  habit(p, pl) {
+    const P = G.players[p];
+    if (pl.kind === 'gas') return { ok: false, why: 'Nothing like you can live on a gas giant.' };
+    if (pl.T >= 1) return { ok: true };
+    if (pl.kind === 'ice' && hasFlag(P, 'cold')) return { ok: true, gene: 'frost' };
+    if (pl.kind === 'lava' && hasFlag(P, 'heat')) return { ok: true, gene: 'heat' };
+    if (pl.T === 0 && hasFlag(P, 'toxin')) return { ok: true, gene: 'toxin' };
+    return { ok: false, why: pl.kind === 'lava' ? 'Far too hot. Heat Scales would let your species live here.' : pl.kind === 'ice' ? 'Too cold. Antifreeze Blood would let you live here, or you can terraform it.' : 'Harsh. An Iron Liver would let you live here, or you can terraform it.' };
+  },
   colonise(p, s, pl, free) {
     const e = this.E(p); if (!free) { if (e.credits < 150) return; e.credits -= 150; }
-    pl.col = { level: 1 }; s.owner = p; e.stat.colonized++; this.paintAll(); Sfx.good(p); toastP(p, `Colony founded at ${s.name}.`, 'good');
+    const h = this.habit(p, pl); if (h.gene) e.stat.adapted++;
+    pl.col = { level: pl.kind === 'ocean' && hasFlag(G.players[p], 'water') ? 2 : 1 }; s.owner = p; e.stat.colonized++; this.paintAll(); Sfx.good(p); toastP(p, `Colony founded at ${s.name}.`, 'good');
+  },
+  survey(p, s, pl) {
+    const e = this.E(p), L = pl.life; if (!L || L.done[p] || e.up.scanner < L.depth) return;
+    L.done[p] = true; e.xeno++; const gain = 30 + L.depth * 35; e.credits += gain; Sfx.coin(p);
+    toastP(p, `Catalogued the ${L.name}: ${L.form}. +${gain} credits. (${e.xeno} species)`, 'good');
+    if (e.xeno % XENO_DRAFT === 0) offerGenes(p, `${e.xeno} alien species catalogued. Your scientists can splice one trait from them into your own people.`, { title: 'Alien genes' });
+  },
+  evacuate(p, s) {
+    const e = this.E(p); let n = 0; for (const pl of s.planets) if (pl.col && !pl.homeworld) { pl.col = null; n++; } s.owner = -1; this.paintAll(); e.credits += n * 75;
+    toastP(p, `Evacuated ${n} colon${n === 1 ? 'y' : 'ies'} from ${s.name}. +${n * 75} credits.`, 'warn');
+  },
+  updNova(dt) {
+    this.novaT -= dt;
+    if (this.novaT <= 0 && !this.stars.some(s => s.nova > 0)) {
+      this.novaT = rand(280, 360); const list = this.stars.filter(s => s.unstable);
+      if (list.length) { const s = list.sort((a, b) => (b.owner >= 0 && b.owner < G.mode) - (a.owner >= 0 && a.owner < G.mode) || Math.min(...this.pl.map(q => Math.hypot(a.x - q.x, a.z - q.z))) - Math.min(...this.pl.map(q => Math.hypot(b.x - q.x, b.z - q.z))))[0]; s.nova = 60; s.unstable = false; for (const q of this.pl) { s.known[q.p] = true; toastP(q.p, `${s.name} is collapsing. It will go supernova in 60 seconds.${s.owner === q.p ? ' Your colonies there must be evacuated.' : ' Keep clear, then harvest what it leaves.'}`, s.owner === q.p ? 'bad' : 'warn'); } }
+    }
+    for (const s of this.stars) {
+      if (!(s.nova > 0)) continue; s.nova -= dt; const g = this.starGlow[s.id]; if (g) g.m.scale.setScalar(40 * s.cls.sz * (1 + (60 - s.nova) / 60 * 2.5 + Math.sin(this.t * (8 + (60 - s.nova) * .3)) * .3));
+      if (s.nova <= 0) {
+        s.nova = 0; s.remnant = [false, false]; this.fx.burst(s.x, s.y + 10, s.z, '#cfe6ff', 120, 90, 2.5); this.fx.burst(s.x, s.y + 10, s.z, '#ffb347', 80, 50, 2);
+        const lost = s.owner >= 0 ? s.planets.filter(pl => pl.col && !pl.homeworld).length : 0, who = s.owner;
+        for (const pl of s.planets) { pl.col = null; if (pl.kind !== 'gas') { pl.T = -1; pl.kind = 'lava'; } }
+        if (who >= 0 && !s.home) { s.owner = -1; if (who < G.mode && lost) toastP(who, `${s.name} exploded. ${lost} colon${lost === 1 ? 'y' : 'ies'} lost.`, 'bad'); }
+        s.cls = STAR_CLASSES[4]; if (g) { g.m.material.color.setHSL(0, 0, .95); g.m.scale.setScalar(26); g.core.scale.setScalar(2.4); }
+        for (const q of this.pl) { const d = Math.hypot(q.x - s.x, q.z - s.z); if (d < 150) { q.hp = Math.max(1, q.hp - this.maxHull(q.p) * .6 * (1 - d / 150)); toastP(q.p, 'The blast wave tears into your hull!', 'bad'); Sfx.bad(q.p); } else if (d < 900) toastP(q.p, `${s.name} has gone supernova. Its remnant can be harvested.`, 'warn'); }
+        this.paintAll();
+      }
+    }
   },
   inOrbit(q) { if (q.battle) return q.battle.star; let best = null, bd = 34; for (const s of this.stars) { const d = Math.hypot(s.x - q.x, s.z - q.z); if (d < bd) { bd = d; best = s; } } return best; },
   battle(p, b) { const q = this.pl[p]; if (q.battle) return; q.battle = { ...b, max: b.hp }; q.vx = q.vz = 0; Sfx.battle(p); toastP(p, `Battle with ${b.name}! ${KEYLABEL[p].back} to retreat.`, 'warn'); },
@@ -221,7 +271,18 @@ const SpaceStage = {
         const out = [], mine = s.owner === p || s.owner < 0;
         if (s.relic && !s.relic.taken) out.push({ label: s.relic.guard ? 'Face the ruin guardian' : 'Take the relic', desc: s.relic.guard ? `Something old guards it. Win and the relic is yours. Odds: ${this.odds(p, s.relic.guard, this.guardDps(s.relic))}.` : 'A Relic of the First Ones.', onSelect: () => this.takeRelic(p, s.relic), close: true });
         if (s.anomaly && !s.anomaly.done[p]) out.push({ label: `Deal with ${s.anomaly.name}`, onSelect: () => this.openAnomaly(p, s) });
-        s.planets.forEach(pl => { const k = PLANET_KINDS[pl.kind]; out.push({ head: true, label: `${k.label}${pl.homeworld ? ' · homeworld' : ''} · ${pl.T < 0 ? 'cannot live here' : pl.T === 0 ? 'harsh' : 'habitable'}${pl.col ? ' · colony' : ''}` }); if (mine && !pl.col && pl.T >= 1) out.push({ label: 'Found a colony', value: 150, desc: '+1.1 credits a second.', disabled: e.credits < 150, onSelect: () => this.colonise(p, s, pl) }); });
+        if (s.nova > 0 && s.owner === p) out.push({ label: 'Evacuate the colonies', value: `${Math.ceil(s.nova)}s`, desc: 'The star is about to explode. Get your people out: you keep 75 credits for each colony.', onSelect: () => this.evacuate(p, s), close: true });
+        if (s.remnant && !s.remnant[p]) out.push({ label: 'Harvest the remnant', value: '+250', desc: 'The dead star left a cloud of heavy elements behind.', onSelect: () => { s.remnant[p] = true; e.credits += 250; Sfx.coin(p); toastP(p, '+250 credits from the remnant.', 'good'); } });
+        s.planets.forEach(pl => {
+          const k = PLANET_KINDS[pl.kind], h = this.habit(p, pl);
+          out.push({ head: true, label: `${k.label}${pl.homeworld ? ' · homeworld' : ''} · ${pl.T < 0 ? 'hostile' : pl.T === 0 ? 'harsh' : 'habitable'}${pl.col ? ` · colony ${pl.col.level}` : ''}${pl.life ? (pl.life.done[p] ? ` · ${pl.life.form}` : ' · signs of life') : ''}` });
+          if (pl.life && !pl.life.done[p]) out.push({ label: 'Survey the life here', value: e.up.scanner >= pl.life.depth ? 'free' : `scanner ${pl.life.depth}`, desc: e.up.scanner >= pl.life.depth ? 'Catalogue it. Credits now, and their genes count towards your next mutation.' : `Too deep for your scanner. Upgrade it to level ${pl.life.depth} at a shipyard.`, disabled: e.up.scanner < pl.life.depth, onSelect: () => this.survey(p, s, pl) });
+          if (mine && !pl.col && !s.nova) {
+            if (h.ok) out.push({ label: 'Found a colony', value: 150, desc: h.gene ? `Your ${GENES[h.gene].name} lets your people live here, where others cannot. +1.1 credits a second.` : `+${pl.kind === 'ocean' && hasFlag(G.players[p], 'water') ? '2.2' : '1.1'} credits a second.`, disabled: e.credits < 150, onSelect: () => this.colonise(p, s, pl) });
+            else if (pl.T === 0 || (pl.kind === 'ice' && pl.T < 1)) out.push({ label: 'Terraform this world', value: TERRAFORM_COST, desc: `${h.why} Terraforming makes it habitable for anyone.`, disabled: e.credits < TERRAFORM_COST, onSelect: () => { if (e.credits < TERRAFORM_COST) return; e.credits -= TERRAFORM_COST; pl.T = 1; Sfx.good(p); toastP(p, `The ${k.label.toLowerCase()} world at ${s.name} is habitable now.`, 'good'); } });
+            else if (pl.kind !== 'gas') out.push({ label: 'Cannot settle', desc: h.why, disabled: true });
+          }
+        });
         if (s.owner === p) { out.push({ head: true, label: 'Shipyard' }); for (const k in SHIP_UP) { const U = SHIP_UP[k], lv = e.up[k], c = U.lv[lv]; out.push({ label: `${U.name} ${lv}/3`, value: lv >= 3 ? 'max' : c, desc: lv >= 3 ? U.desc(U.val[lv]) : 'Next: ' + U.desc(U.val[lv + 1]), disabled: lv >= 3 || e.credits < c, onSelect: () => { if (lv >= 3 || e.credits < c) return; e.credits -= c; e.up[k]++; if (k === 'hull') q.hp = this.maxHull(p); Sfx.good(p); } }); } out.push({ label: 'Repair the hull', value: 'free', disabled: q.hp >= this.maxHull(p) - 1, onSelect: () => { q.hp = this.maxHull(p); } }); }
         if (s.owner >= 0 && s.owner !== p) out.push({ label: 'Talk to them', value: KEYLABEL[p].a2, onSelect: () => this.openDiplo(p, this.emps[s.owner]) }, { label: 'Attack this system', value: KEYLABEL[p].a4, onSelect: () => this.attack(q), close: true });
         out.push({ label: 'Close', close: true, onSelect: () => {} }); return out;
@@ -248,7 +309,9 @@ const SpaceStage = {
     const e = this.E(p), q = this.pl[p];
     Menus[p].open({ eyebrow: 'Your empire', title: e.name, live: true, sub: () => `${fmt(e.credits)} credits (+${this.income(p).toFixed(1)}) · ${this.relicsFor(p)} of ${this.need(p)} relics${G.accord && G.mode === 2 ? ' between you' : ''}`,
       items: () => [
+        ...evolveItems(p),
         { head: true, label: 'The voyage' },
+        { label: 'Xenology catalogue', value: `${e.xeno} species`, desc: `Survey life at stars with ${KEYLABEL[p].a1}. Every ${XENO_DRAFT} species offers a mutation; ${XENO_DRAFT - e.xeno % XENO_DRAFT} more for the next one.` },
         { label: 'Relics of the First Ones', value: `${this.relicsFor(p)}/${this.need(p)}`, desc: `${this.relicTotal} exist: ${this.relicSites.length} in ancient ruins, the rest kept by empires. Ally, buy or conquer to get theirs.` },
         { label: 'Compass', value: ['unexplored', 'relic', 'home', 'core'][q.compass], desc: `${KEYLABEL[p].back} cycles where it points.`, onSelect: () => { q.compass = (q.compass + 1) % 4; } },
         { head: true, label: 'Empires' },
@@ -282,6 +345,7 @@ const SpaceStage = {
     for (const q of this.pl) safely(() => this.updPlayer(q, dt));
     for (const e of this.emps) { if (e.player || !e.alive) continue; e.power += dt * .025; e.think -= dt; if (e.think <= 0) { e.think = rand(12, 18); this.empThink(e); } }
     for (const pr of this.pirates) this.updPirate(pr, dt);
+    this.updNova(dt);
     this.fx.update(dt); WORLD_TIME.value += dt;
     Disc.update(dt, p => { const q = this.pl[p]; return q && !q.battle ? q : null; });
   },
@@ -302,7 +366,7 @@ const SpaceStage = {
     if (s && !s.visited[p]) { s.visited[p] = true; if (s.owner >= G.mode) { const em = this.emps[s.owner]; if (!em.contact[p]) { em.contact[p] = true; toastP(p, `First contact: the ${em.name}. ${PERSONAS[em.persona].label}, attitude ${em.rel[p] > 20 ? 'friendly' : em.rel[p] < -20 ? 'hostile' : 'neutral'}.${em.relic ? ' They keep a relic.' : ''}`); } if (em.war[p] && !q.battle) this.battle(p, { kind: 'raid', hp: 90 + em.power * 5, dps: 8 + em.power * .6, star: s, emp: em, name: `a ${em.name} patrol` }); } }
     if (!sealed && R < 70 && !this.victory) this.enterCore(p);
     // repair at friendly stars
-    if (s && !q.battle) { const friendly = s.owner === p || (s.owner >= G.mode && this.emps[s.owner].ally[p]); q.hp = Math.min(this.maxHull(p), q.hp + (friendly ? 30 : 3) * dt); }
+    if (s && !q.battle) { const friendly = s.owner === p || (s.owner >= G.mode && this.emps[s.owner].ally[p]); q.hp = Math.min(this.maxHull(p), q.hp + (friendly ? 30 : 3) * (hasFlag(G.players[p], 'regen') ? 2 : 1) * dt); }
     if (q.battle) {
       const b = q.battle; b.hp -= this.dps(p) * dt; q.hp -= b.dps * dt; const st = b.star || q;
       if (Math.random() < dt * 14) this.fx.burst(st.x + rand(-30, 30), (st.y || 0) + rand(0, 10), st.z + rand(-30, 30), '#ffb347', 3, 8, .4);
@@ -332,6 +396,30 @@ const SpaceStage = {
       if (e.war[p] && (e.raidT[p] -= 15) <= 0) { e.raidT[p] = rand(80, 120); const tg = this.stars.filter(s => s.owner === p && !s.home).sort((a, b) => Math.min(...mine.map(m => Math.hypot(m.x - a.x, m.z - a.z))) - Math.min(...mine.map(m => Math.hypot(m.x - b.x, m.z - b.z))))[0]; if (tg && mine.length && !this.pl[p].battle) { for (const pl of tg.planets) pl.col = null; this.claim(tg, e.id); toastP(p, `The ${e.name} took your colony at ${tg.name}.`, 'bad'); } }
     }
   },
+  calm(p) { return !this.pl[p].battle; },
+  memoryBonus(p) { this.E(p).credits += 60; return '+60 credits.'; },
+  chronicle: [
+    { id: 'distress', title: 'A distress call', text: 'A weak signal is repeating on an old band: a ship in trouble, somewhere close.',
+      choices: [
+        { label: 'Answer it', desc: 'Most of the time it is real, and grateful. Sometimes it is a trap.', go(p) { const e = this.E(p); if (Math.random() < .65) { e.credits += 150; const em = this.emps.filter(x => !x.player && x.alive)[0]; if (em) em.rel[p] = Math.min(100, em.rel[p] + 15); return `You saved the crew. +150 credits${em ? `, and the ${em.name} heard about it` : ''}.`; } const q = this.pl[p]; if (!q.battle) this.battle(p, { kind: 'pirate', hp: 130 + this.t * .05, dps: 10, star: null, pirate: { alive: true }, reward: 140, name: 'pirates' }); return 'It was a trap!'; } },
+        { label: 'Keep flying', desc: 'Nothing gained, nothing risked.', go() { return 'The signal fades behind you.'; } }] },
+    { id: 'firstones', title: 'The First Ones speak', text: 'For one second every screen on your ship shows a tide pool, a cell, a creature, a city, a ship. Then it shows a star.',
+      choices: [
+        { label: 'Follow the star', desc: 'It marks a relic site on your map.', go(p) { const r = this.relicSites.find(x => !x.taken && !x.known[p]) || this.relicSites.find(x => !x.taken); if (r) { r.known[p] = true; r.s.known[p] = true; this.pl[p].compass = 1; return `It points at ${r.s.name}. Your compass is set.`; } return 'The star it showed is already empty.'; } },
+        { label: 'Record it and sell the recording', desc: '+220 credits from collectors.', go(p) { this.E(p).credits += 220; return '+220 credits.'; } }] },
+    { id: 'homeworld', title: 'A message from home', text: 'Your homeworld has had a good year. The council asks how to spend the surplus.',
+      choices: [
+        { label: 'Grow the colonies', desc: 'Every colony grows a level (up to 3).', go(p) { let n = 0; for (const { pl } of this.colonies(p)) if (pl.col.level < 3) { pl.col.level++; n++; } return `${n} colonies grew.`; } },
+        { label: 'Build up the fleet', desc: '+1 weapons level, or 200 credits if your guns are maxed.', go(p) { const e = this.E(p); if (e.up.weapons < 3) { e.up.weapons++; return 'Weapons upgraded.'; } e.credits += 200; return '+200 credits.'; } }] },
+    { id: 'kin', title: 'A world like your first', when(p) { return this.E(p).xeno >= 2; }, text: 'One of the species you catalogued is not so different from your ancestors in the tide pool. It is just starting to think.',
+      choices: [
+        { label: 'Lift them up', desc: 'Teach them. They become a free colony and remember you as friends.', go(p) { const q = this.pl[p], t = this.freeWorld(p, q); if (t) { this.colonise(p, t.s, t.pl, true); this.E(p).stat.allied++; return `They found a home at ${t.s.name} and call you family.`; } this.E(p).credits += 150; return 'There was nowhere for them to go, so they paid you in stories and ore. +150 credits.'; } },
+        { label: 'Let them find their own way', desc: '+1 scanner level from watching them grow.', go(p) { const e = this.E(p); if (e.up.scanner < 3) { e.up.scanner++; return 'Scanner upgraded.'; } e.credits += 150; return '+150 credits.'; } }] },
+    { id: 'rivalhelp', title: 'Your rival is struggling', when(p) { return G.mode === 2; }, text: p => `P${other(p) + 1}'s colonies are short of supplies. Their council has asked you directly.`,
+      choices: [
+        { label: 'Send supplies', desc: 'They get 150 credits, you spend 100.', ok(p) { return this.E(p).credits >= 100; }, go(p) { this.E(p).credits -= 100; this.E(other(p)).credits += 150; toastP(other(p), `P${p + 1} sent you 150 credits of supplies.`, 'good'); return 'Supplies sent.'; } },
+        { label: 'Say no', desc: 'Keep what is yours.', go() { return 'You keep your credits.'; } }] },
+  ],
   /* ---------- view ---------- */
   camFor(i, cam, dt) {
     const q = this.pl[i]; if (!q) return; const k = dt ? Math.min(1, dt * 3) : 1, zoom = q.battle ? .75 : 1;
@@ -350,9 +438,10 @@ const SpaceStage = {
     for (const { s } of list) {
       const v = project(_kv.set(s.x, s.y + 16, s.z), i); if (!v) continue; const own = s.owner >= 0 ? this.emps[s.owner] : null;
       if (!s.known[i]) { pane.label(v.x, v.y, '<small style="color:#6f6890">?</small>'); continue; }
-      const tags = (s.relic && !s.relic.taken ? '◆' : '') + (s.anomaly && !s.anomaly.done[i] ? '✺' : '') + (s.home ? '★' : '') + (own && !own.player && own.relic ? '◆' : '');
+      const tags = (s.relic && !s.relic.taken ? '◆' : '') + (s.anomaly && !s.anomaly.done[i] ? '✺' : '') + (s.home ? '★' : '') + (own && !own.player && own.relic ? '◆' : '') + (s.visited[i] && s.planets.some(pl => pl.life && !pl.life.done[i]) ? '❦' : '') + (s.remnant && !s.remnant[i] ? '✧' : '') + (s.nova > 0 ? ` ☢ ${Math.ceil(s.nova)}s` : '');
       pane.label(v.x, v.y, `<span style="color:${own ? hueCss(own.hue, 70, 75) : s.visited[i] ? '#efe9f7' : '#a59fc4'}">${esc(s.name)}${tags ? ` <b style="color:#ffd34d">${tags}</b>` : ''}</span>${s === orbit ? `<small>${own ? esc(own.name) : 'unclaimed'} · ${s.planets.filter(p => p.T >= 1).length} habitable</small>` : ''}`, s === orbit ? 'sel' : '');
     }
+    for (const s of this.stars) if (s.nova > 0 && (s.owner === i || Math.hypot(s.x - q.x, s.z - q.z) < 1200)) edgeMark(pane, i, s.x, s.y, s.z, `☢ ${s.name} · ${Math.ceil(s.nova)}s`, '#ff7a59');
     const c = project(_kv.set(0, 60, 0), i); if (c) pane.label(c.x, c.y, `<span style="color:#d9c4ff">Galactic Core</span><small>${this.relicsFor(i) >= this.need(i) ? 'open to you' : `sealed · ${this.relicsFor(i)}/${this.need(i)} relics`}</small>`);
     for (const pr of this.pirates) if (pr.alive && Math.hypot(pr.x - q.x, pr.z - q.z) < 500) { const v = project(_kv.set(pr.x, 30, pr.z), i); if (v) pane.label(v.x, v.y, '<small style="color:#ff6a6a">pirates</small>'); }
     const t = this.compassTarget(q); if (t && t.s && !edgeMark(pane, i, t.s.x, t.s.y + 10, t.s.z, t.label, t.col) && t.s !== orbit) { const v = project(_kv.set(t.s.x, t.s.y - 14, t.s.z), i); if (v) pane.label(v.x, v.y + 34, `<small style="color:${t.col}">▲ compass</small>`); }
@@ -362,7 +451,7 @@ const SpaceStage = {
   beforeRender(i) {
     const q = this.pl[i]; if (!q) return; const pane = Panes[i], e = this.E(i), s = this.inOrbit(q);
     pane.meter('hull', q.hp, this.maxHull(i)); pane.meter('rel', this.relicsFor(i), this.need(i), `${this.relicsFor(i)} of ${this.need(i)}`);
-    pane.stat('cr', `${fmt(e.credits)} +${this.income(i).toFixed(1)}`); pane.stat('col', this.colonies(i).length); pane.stat('ex', `${this.stars.filter(x => x.visited[i]).length}/${this.stars.length - 1}`); pane.stat('won', `${Disc.count(i)}/${Disc.list.length}`);
+    pane.stat('cr', `${fmt(e.credits)} +${this.income(i).toFixed(1)}`); pane.stat('col', this.colonies(i).length); pane.stat('ex', `${this.stars.filter(x => x.visited[i]).length}/${this.stars.length - 1}`); pane.stat('won', `${Disc.count(i)}/${Disc.list.length}`); pane.stat('xe', `${e.xeno} species`); pane.stat('gen', (G.players[i].genes || []).length);
     const foreign = s && s.owner >= 0 && s.owner !== i;
     pane.acts(q.battle ? [{ act: 'back', label: 'Retreat', hot: true }] : [{ act: 'a1', label: 'System', off: !s, hot: !!s }, { act: 'a2', label: 'Talk', off: !foreign }, { act: 'a4', label: 'Attack', off: !foreign }, { act: 'a3', label: 'Boost' }, { act: 'menu', label: 'Empire' }, { act: 'back', label: 'Compass' }]);
     pane.prompt(q.battle ? `Battle with ${q.battle.name}: enemy ${Math.max(0, Math.round(q.battle.hp))} · your hull ${Math.round(q.hp)}` : s ? (s.core ? 'The galactic core' : `In orbit at ${s.name}${s.owner === i ? ' · shipyard open' : ''}${s.relic && !s.relic.taken ? ` · ruins here, press ${KEYLABEL[i].a1}` : ''}${s.anomaly && !s.anomaly.done[i] ? ` · anomaly, press ${KEYLABEL[i].a1}` : ''}`) : '');

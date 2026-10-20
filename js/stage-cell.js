@@ -49,10 +49,11 @@ const CellStage = {
     this.pl = [];
     for (let p = 0; p < G.mode; p++) {
       const P = G.players[p]; if (!P.cell || P.cell.kind !== 'cell') P.cell = starterCell(P);
-      const q = { p, x: G.mode === 2 ? (p ? 25 : -25) : 0, z: 0, vx: 0, vz: 0, a: -Math.PI / 2, mass: 4, k: 1, hp: 1, maxhp: 1, dead: 0, biteCd: 0, dashCd: 0, dash: 0, zapCd: 0, hurtT: 9, dna: 20 + (P.dna || 0), plant: 0, meat: 0, kills: 0, deaths: 0, cloudT: 0, inv: 2, shake: 0, lungeCd: 0 };
+      const q = { p, x: G.mode === 2 ? (p ? 25 : -25) : 0, z: 0, vx: 0, vz: 0, a: -Math.PI / 2, mass: 4, k: 1, hp: 1, maxhp: 1, dead: 0, biteCd: 0, dashCd: 0, dash: 0, zapCd: 0, hurtT: 9, dna: 20 + (P.dna || 0), plant: 0, meat: 0, kills: 0, deaths: 0, cloudT: 0, inv: 2, shake: 0, lungeCd: 0, drafts: 0, engulfs: 0, guard: 1 };
       this.pl.push(q); this.rebuild(q); this.recalc(q); q.hp = q.maxhp;
-      Panes[p].build({ eyebrow: 'Stage 1 · Cell', title: P.name, meters: [{ id: 'hp', label: 'Health', color: 'var(--membrane)' }, { id: 'gr', label: 'Growth', color: 'var(--chloro)' }], stats: [{ id: 'dna', label: 'DNA' }, { id: 'diet', label: 'Diet' }, { id: 'won', label: 'Curiosities' }, { id: 'size', label: 'Size' }] });
+      Panes[p].build({ eyebrow: 'Stage 1 · Cell', title: P.name, meters: [{ id: 'hp', label: 'Health', color: 'var(--membrane)' }, { id: 'gr', label: 'Growth', color: 'var(--chloro)' }], stats: [{ id: 'dna', label: 'DNA' }, { id: 'diet', label: 'Diet' }, { id: 'won', label: 'Curiosities' }, { id: 'size', label: 'Size' }, { id: 'gen', label: 'Genes' }] });
       toastP(p, `Eat and grow. ${KEYLABEL[p].a1} dash, ${KEYLABEL[p].a3} lunge bite, ${KEYLABEL[p].menu} cell editor, ${KEYLABEL[p].back} cell menu. Glowing shapes in the deep are curiosities worth swimming to.`);
+      toastP(p, `Lunge into a cell less than half your size to engulf it whole. Some engulfed cells survive inside you and become part of you.`);
     }
     this.boss = null; this.bossT = 100;
   },
@@ -65,7 +66,7 @@ const CellStage = {
   recalc(q) {
     q.mass = Math.min(q.mass, CELL_MAX); const A = q.ab.A, P = G.players[q.p];
     q.k = .8 + Math.sqrt(q.mass) * .16; q.r = q.B.radius * q.k * .9;
-    q.speed = (7 + A.speed * 2.6 + A.turn * .6) * (.9 + q.k * .1);
+    q.speed = (7 + A.speed * 2.6 + A.turn * .6) * (.9 + q.k * .1) * (P.mods.speed || 1);
     const old = q.maxhp; q.maxhp = (30 + A.armor * 18 + q.k * 14 + q.B.ab.vol * 20) * P.mods.hp; if (old > 1) q.hp = Math.min(q.maxhp, q.hp + Math.max(0, q.maxhp - old));
     const d = q.ab.diet; q.bite = d === 'carn' ? 12 + q.k * 6 : d === 'omni' ? 7 + q.k * 3 : 0;
     q.cr.k = q.k;
@@ -95,7 +96,7 @@ const CellStage = {
   onAction(p, act) {
     const q = this.pl[p]; if (!q || q.dead) return; const A = q.ab.A;
     if (act === 'menu') this.openEditor(p);
-    else if (act === 'a1') { if (q.dashCd > 0) return; q.dash = .35 + A.dash * .08; q.dashCd = Math.max(1, 3 - A.dash * .5 - A.speed * .2); Sfx.tone(300, .15, 'sine', .03, 2, Sfx.pan(p)); this.fx.burst(q.x, 0, q.z, '#bfe8ff', 8, 6, .4); }
+    else if (act === 'a1') { if (q.dashCd > 0) return; q.dash = .35 + A.dash * .08; q.dashCd = Math.max(1, 3 - A.dash * .5 - A.speed * .2) * (hasFlag(G.players[p], 'mito') ? .7 : 1); Sfx.tone(300, .15, 'sine', .03, 2, Sfx.pan(p)); this.fx.burst(q.x, 0, q.z, '#bfe8ff', 8, 6, .4); }
     else if (act === 'a2' && A.shock && q.zapCd <= 0) this.zap(q);
     else if (act === 'a3') this.lunge(q);
     else if (act === 'a4' && G.mode === 2 && G.accord) { const o = this.pl[other(p)]; if (q.dna >= 10 && o && !o.dead) { q.dna -= 10; o.dna += 10; toastP(o.p, `P${p + 1} sent you 10 DNA.`, 'good'); this.fx.text(q.x, 2, q.z, '-10 DNA', '#ffd34d', p); } }
@@ -119,7 +120,7 @@ const CellStage = {
     for (const n of this.cells) if (Math.hypot(n.x - q.x, n.z - q.z) < R + n.r) { n.hp -= dmg; n.flash = .2; n.stun = 1.5; n.lastHit = q.p; }
     for (const o of this.pl) if (o !== q && !o.dead && canHarm() && Math.hypot(o.x - q.x, o.z - q.z) < R + o.r) { this.hurtPlayer(o, dmg * .6, `P${q.p + 1} shocked you!`); o.stun = 1; }
   },
-  hurtPlayer(q, dmg, msg) { if (q.dead || q.inv > 0) return; q.shake = Math.min(.6, (q.shake || 0) + .3); q.hp -= dmg * (1 - q.ab.A.armor * .12); q.hurtT = 0; Sfx.hurt(q.p); this.fx.text(q.x, 2, q.z, '-' + Math.round(dmg), '#ff4d6d', q.p); if (msg) toastP(q.p, msg, 'bad'); },
+  hurtPlayer(q, dmg, msg) { if (q.dead || q.inv > 0) return; q.shake = Math.min(.6, (q.shake || 0) + .3); q.hp -= dmg * (1 - q.ab.A.armor * .12) * (q.guard || 1); q.hurtT = 0; Sfx.hurt(q.p); this.fx.text(q.x, 2, q.z, '-' + Math.round(dmg), '#ff4d6d', q.p); if (msg) toastP(q.p, msg, 'bad'); },
   update(dt0) {
     let dt = dt0; if (this.hitstop > 0) { this.hitstop -= dt0; dt = dt0 * .15; }
     this.t += dt; this.updateBloom(dt); Disc.update(dt, p => { const q = this.pl[p]; return q && !q.dead ? q : null; });
@@ -147,7 +148,7 @@ const CellStage = {
     if (q.dead > 0) { q.dead -= dt; pane.wait(true, 'Eaten!', `A descendant divides again in ${Math.ceil(q.dead)}…`); if (q.dead <= 0) this.respawn(q); this.hud(q); return; }
     q.biteCd -= dt; q.dashCd -= dt; q.zapCd -= dt; q.lungeCd -= dt; q.shake = Math.max(0, (q.shake || 0) - dt * 2); q.lungeT = (q.lungeT || 0) - dt; q.hurtT += dt; q.dash -= dt; q.stun = (q.stun || 0) - dt; q.inv -= dt;
     const dir = Menus[q.p].isOpen || q.stun > 0 ? { x: 0, z: 0, m: 0 } : dirOf(q.p);
-    const spd = q.speed * (q.dash > 0 ? 2.4 : q.lungeT > 0 ? 2.6 : 1), acc = q.speed * (4.5 + A.turn * 1.2);
+    const adren = hasFlag(P, 'adren') && q.hp < q.maxhp / 3 ? 1.4 : 1, spd = q.speed * adren * (q.dash > 0 ? 2.4 : q.lungeT > 0 ? 2.6 : 1), acc = q.speed * (4.5 + A.turn * 1.2);
     q.vx += dir.x * dir.m * acc * dt; q.vz += dir.z * dir.m * acc * dt;
     const s = Math.hypot(q.vx, q.vz); if (s > spd) { q.vx *= spd / s; q.vz *= spd / s; }
     const fr = q.lungeT > 0 ? .3 : !dir.m ? 1.8 + A.turn : 1.6; q.vx *= 1 - Math.min(1, dt * fr); q.vz *= 1 - Math.min(1, dt * fr);
@@ -155,9 +156,14 @@ const CellStage = {
     q.x += q.vx * dt; q.z += q.vz * dt;
     if (s > .5) q.a = lerpAng(q.a, Math.atan2(q.vz, q.vx), dt * (5 + A.turn * 2));
     const dc = Math.hypot(q.x, q.z); if (dc > this.R) { q.x *= this.R / dc; q.z *= this.R / dc; }
-    if (q.hurtT > 3) q.hp = Math.min(q.maxhp, q.hp + q.maxhp * .05 * dt);
+    if (q.hurtT > 3) q.hp = Math.min(q.maxhp, q.hp + q.maxhp * .05 * (hasFlag(P, 'regen') ? 2 : 1) * dt);
+    if (hasFlag(P, 'photo') && q.mass < CELL_MAX) { q.mass += .12 * dt; q.photoT = (q.photoT || 0) + dt; if (q.photoT > 1) { q.photoT = 0; this.recalc(q); } }
     if (G.accord) for (const o of this.pl) if (o !== q && !o.dead && Math.hypot(o.x - q.x, o.z - q.z) < 18) q.hp = Math.min(q.maxhp, q.hp + q.maxhp * .05 * dt);
-    for (const v of this.vents) if (Math.hypot(q.x - v.x, q.z - v.z) < v.r + q.r * .4) { q.hp -= 8 * dt; q.hurtT = 0; }
+    for (const v of this.vents) if (Math.hypot(q.x - v.x, q.z - v.z) < v.r + q.r * .4) {
+      /* heat-adapted cells feed on the vents instead of burning, the way real vent life does */
+      if (hasFlag(P, 'heat')) { q.hp = Math.min(q.maxhp, q.hp + q.maxhp * .06 * dt); if (q.mass < CELL_MAX) q.mass += .5 * dt; q.ventT = (q.ventT || 0) + dt; if (q.ventT > .7) { q.ventT = 0; q.dna += 1; this.recalc(q); this.fx.text(q.x, 2, q.z, '+1 DNA', '#ffb070', q.p); } }
+      else { q.hp -= 8 * dt; q.hurtT = 0; }
+    }
     if (A.poison) { q.cloudT -= dt; if (q.cloudT <= 0 && s > 2) { q.cloudT = .22; this.clouds.push({ x: q.x - Math.cos(q.a) * q.r, z: q.z - Math.sin(q.a) * q.r, r: q.r * .7, life: 2.5, owner: q.p }); } }
     for (const f of this.food) {
       if (f.life <= 0) continue; const d = Math.hypot(f.x - q.x, f.z - q.z), ok = this.canEat(q, f.type);
@@ -168,7 +174,9 @@ const CellStage = {
       } else if (ok && d < q.r * 3.5) { f.x += (q.x - f.x) / d * 3.5 * dt; f.z += (q.z - f.z) / d * 3.5 * dt; }
     }
     if (q.lungeT > 0 && !q.lungeHit) {
-      for (const n of this.cells) { if (n.hp <= 0 || Math.hypot(n.x - q.x, n.z - q.z) > q.r + n.r + .6) continue; q.lungeHit = true; const dmg = (q.bite || 3) * 1.6 * P.mods.dmg * (this.teamHit(q, n) ? 1.4 : 1); n.hp -= dmg; n.flash = .2; n.lastHit = q.p; n.stun = .5; n.windup = 0; const d = Math.hypot(n.x - q.x, n.z - q.z) || 1; this.knock(n, (n.x - q.x) / d, (n.z - q.z) / d, 14); q.vx *= -.3; q.vz *= -.3; this.hitstop = .06; q.shake = Math.min(.5, q.shake + .2); Sfx.hit(q.p); this.fx.burst(n.x, .5, n.z, '#ffd2c4', 10, 7, .4); this.fx.text(n.x, n.r + 2, n.z, Math.round(dmg), '#ffe2d6', q.p); break; }
+      for (const n of this.cells) { if (n.hp <= 0 || Math.hypot(n.x - q.x, n.z - q.z) > q.r + n.r + .6) continue; q.lungeHit = true;
+        if (this.canEngulf(q, n)) { this.engulf(q, n); break; }
+        const dmg = (q.bite || 3) * 1.6 * P.mods.dmg * (this.teamHit(q, n) ? 1.4 : 1) * adren; if (hasFlag(P, 'venom')) { n.venom = 3; n.venomBy = q.p; } n.hp -= dmg; n.flash = .2; n.lastHit = q.p; n.stun = .5; n.windup = 0; const d = Math.hypot(n.x - q.x, n.z - q.z) || 1; this.knock(n, (n.x - q.x) / d, (n.z - q.z) / d, 14); q.vx *= -.3; q.vz *= -.3; this.hitstop = .06; q.shake = Math.min(.5, q.shake + .2); Sfx.hit(q.p); this.fx.burst(n.x, .5, n.z, '#ffd2c4', 10, 7, .4); this.fx.text(n.x, n.r + 2, n.z, Math.round(dmg), '#ffe2d6', q.p); break; }
       if (!q.lungeHit) for (const o of this.pl) { if (o === q || o.dead || !canHarm() || o.inv > 0 || Math.hypot(o.x - q.x, o.z - q.z) > q.r + o.r + .6) continue; q.lungeHit = true; this.hurtPlayer(o, (q.bite || 3) * 1.3 * P.mods.dmg, `P${q.p + 1} bit you!`); const d = Math.hypot(o.x - q.x, o.z - q.z) || 1; this.knock(o, (o.x - q.x) / d, (o.z - q.z) / d, 12); this.hitstop = .06; if (o.hp <= 0) { q.mass += o.mass * .3; q.dna += 15; this.recalc(q); toastP(q.p, `You ate P${o.p + 1}!`, 'good'); } break; }
     }
     if (this.bloom && Math.hypot(this.bloom.x - q.x, this.bloom.z - q.z) < this.bloom.r) { q.dna += 6 * dt * (G.accord ? 1.3 : 1); q.mass += .6 * dt; this.recalc(q); }
@@ -186,6 +194,8 @@ const CellStage = {
       }
     }
     if (q.hp <= 0) this.die(q);
+    /* a mutation draft at a quarter, half and three quarters of the way to legs */
+    while (q.drafts < 3 && q.mass >= CELL_GOAL * (q.drafts + 1) * .25) { q.drafts++; offerGenes(q.p, `Your cell has grown ${q.drafts * 25}% of the way. Pick one mutation; it stays with your species to the very end.`); }
     if (q.mass >= CELL_GOAL && !Flow.ready[q.p]) {
       const tot = q.plant + q.meat, mf = tot ? q.meat / tot : .5, dt2 = q.ab.diet;
       const style = dt2 === 'carn' ? 'aggr' : dt2 === 'herb' ? 'social' : mf > .7 ? 'aggr' : mf < .3 ? 'social' : 'mixed';
@@ -203,6 +213,7 @@ const CellStage = {
   },
   updateNpc(n, dt) {
     n.t += dt; n.cd -= dt; n.flash -= dt; n.tired -= dt; n.stun = (n.stun || 0) - dt;
+    if (n.venom > 0) { n.venom -= dt; n.hp -= 7 * dt; n.lastHit = n.venomBy; if (Math.random() < dt * 6) this.fx.burst(n.x, .5, n.z, '#9be15a', 1, 2, .5); }
     if (n.windup > 0) { n.windup -= dt; n.vx *= 1 - dt * 6; n.vz *= 1 - dt * 6; const t = n.wTarget; if (t && !t.dead) n.a = lerpAng(n.a, Math.atan2(t.z - n.z, t.x - n.x), dt * 8); n.x += n.vx * dt; n.z += n.vz * dt;
       if (n.windup <= 0) { const v = n.sp * (n.kind === 'stinger' ? 4.2 : 3.4); n.vx = Math.cos(n.a) * v; n.vz = Math.sin(n.a) * v; n.dashT = .4; n.cd = 0; Sfx.tone(140, .12, 'sawtooth', .02, 1.5); }
       n.cr.st.pose = true; n.cr.update(dt, n.x, n.z, n.a, () => 0, 0); n.cr.mesh.visible = Math.floor(n.windup * 16) % 2 === 0; return; }
@@ -256,13 +267,53 @@ const CellStage = {
     n.cr.mesh.visible = !(n.flash > 0 && Math.floor(n.flash * 30) % 2);
   },
   killNpc(n) {
-    n.dead = true; const cnt = Math.ceil(n.k * 2);
+    n.dead = true; const cnt = n.engulfed ? 0 : Math.ceil(n.k * 2);
     for (let i = 0; i < cnt; i++) this.food.push({ x: n.x + rand(-n.r, n.r) * .6, z: n.z + rand(-n.r, n.r) * .6, y: 0, r: .3 + n.k * .15, type: 'meat', val: n.k * 1.6, w: rand(0, TAU), life: 30 });
     this.fx.burst(n.x, 0, n.z, hueCss(n.B.body.paint.h1), 14, 9, .7);
-    if (n.lastHit !== undefined) { const q = this.pl[n.lastHit]; if (q) { q.kills++; q.dna += n.kind === 'boss' ? 45 : 3; if (n.kind === 'boss') toastAll(`P${q.p + 1} brought down the leviathan! +45 DNA.`, 'good'); } }
+    if (n.lastHit !== undefined) { const q = this.pl[n.lastHit]; if (q) { q.kills++; q.dna += n.kind === 'boss' ? 45 : 3; if (n.kind === 'boss') { toastAll(`P${q.p + 1} brought down the leviathan! +45 DNA.`, 'good'); offerGenes(q.p, 'You ate a giant, and some of what made it strong is now yours.'); } } }
     if (n.kind === 'splitter' && n.gen < 2 && n.k > .5) { this._split = this._split || []; for (let i = 0; i < 2; i++) { const kk = n.k * .62, cr = new Creature(n.B, kk, { shadow: false }); this.scene.add(cr.group); const a = rand(0, TAU), hp = n.maxhp * .45; this._split.push({ ...n, cr, k: kk, r: n.B.radius * kk * .9, hp, maxhp: hp, x: n.x + Math.cos(a) * n.r, z: n.z + Math.sin(a) * n.r, vx: Math.cos(a) * 10, vz: Math.sin(a) * 10, dead: false, gen: n.gen + 1, lastHit: undefined, flags: n.flags.map(f => ({ ...f })) }); } this.fx.burst(n.x, 0, n.z, '#7ee0ff', 16, 8, .5); }
     if (n === this.boss) this.boss = null;
   },
+  /* ---------- engulfing and endosymbiosis ---------- */
+  canEngulf(q, n) { return n.kind !== 'boss' && n.kind !== 'splitter' && n.k < q.k * .5; },
+  engulf(q, n) {
+    const P = G.players[q.p], eats = q.ab.diet !== 'herb', gain = n.k * 2.4;
+    n.engulfed = true; n.hp = 0; n.lastHit = q.p; q.engulfs++; q.vx *= .3; q.vz *= .3; q.cr.st.bite = .4;
+    if (eats) { q.mass += gain; q.meat += gain; this.recalc(q); }
+    q.dna += 3; Sfx.eat(q.p); this.fx.burst(n.x, .5, n.z, '#bfe8ff', 12, 4, .5); this.fx.text(n.x, n.r + 2, n.z, eats ? 'engulfed' : 'taken in', '#bfe8ff', q.p);
+    /* the cell you swallowed may live on inside you: herbivores keep their catch alive, so they capture more often */
+    const sym = { grazer: 'chloro', schooler: 'mito', drifter: 'glow', swarmer: 'mito' }[n.kind];
+    if (sym && !hasGene(P, sym) && Math.random() < (eats ? .25 : .5) + (q.engulfs > 8 ? .2 : 0)) {
+      addGene(P, sym, true); toastP(q.p, `Endosymbiosis! The ${n.kind} you swallowed survived inside you. ${GENES[sym].name}: ${GENES[sym].desc}`, 'good'); Sfx.discover(q.p);
+      this.fx.burst(q.x, 1, q.z, '#a6ffcf', 26, 6, 1);
+    }
+  },
+  onGene(p) { const q = this.pl && this.pl[p]; if (q) this.recalc(q); },
+  calm(p) { const q = this.pl[p]; return q && !q.dead && !this.cells.some(n => n.wTarget === q && n.windup > 0) && !(this.boss && Math.hypot(this.boss.x - q.x, this.boss.z - q.z) < 45); },
+  memoryBonus(p) { const q = this.pl[p]; q.dna += 6; return '+6 DNA.'; },
+  /* ---------- the chronicle ---------- */
+  chronicle: [
+    { id: 'virus', title: 'A stranger at the membrane', text: 'A strand of foreign code is pressing against your membrane, trying to get in.',
+      choices: [
+        { label: 'Let it in', desc: 'Gain a random mutation, but the fight to absorb it costs half your health.', go(p) { const q = this.pl[p], P = G.players[p], ids = draftGenes(P, 1); q.hp = Math.max(1, q.hp * .5); if (ids[0]) { addGene(P, ids[0], true); return `The code rewrote you. ${GENES[ids[0]].name}: ${GENES[ids[0]].desc}`; } return 'The code found nothing new to change.'; } },
+        { label: 'Seal your membrane', desc: '+8 DNA from the strands you shred.', go(p) { this.pl[p].dna += 8; return '+8 DNA.'; } }] },
+    { id: 'giant', title: 'A giant is dying', text: 'One of the giants drifting far below is dying. Its body will feed the whole pool, and you are close.',
+      choices: [
+        { label: 'Feast on it', desc: 'Meat rains down around you. Needs a mouth that eats meat.', ok(p) { return this.pl[p].ab.diet !== 'herb'; }, go(p) { const q = this.pl[p]; for (let i = 0; i < 14; i++) { const a = rand(0, TAU), d = rand(4, 24); this.food.push({ x: q.x + Math.cos(a) * d, z: q.z + Math.sin(a) * d, y: 0, r: .5, type: 'meat', val: 2.2, w: rand(0, TAU), life: 50 }); } return 'Meat drifts down all around you.'; } },
+        { label: 'Wait for the bloom it leaves', desc: 'Its body feeds the plants. A garden grows around you.', go(p) { const q = this.pl[p]; for (let i = 0; i < 40; i++) { const a = rand(0, TAU), d = rand(3, 30); this.food.push({ x: q.x + Math.cos(a) * d, z: q.z + Math.sin(a) * d, y: rand(-1, 1), r: .5, type: 'plant', val: 1.4, w: rand(0, TAU), life: 1e9 }); } return 'Plants burst up all around you.'; } }] },
+    { id: 'colony', title: 'Followers', text: 'A cloud of tiny cells has started following you, sheltering in your wake.',
+      choices: [
+        { label: 'Let them stay', desc: 'They gather around you as a living shield: take 20% less damage for the rest of this stage.', go(p) { this.pl[p].guard = .8; return 'Your little colony closes in around you.'; } },
+        { label: 'Eat them', desc: '+12 growth and +8 DNA, right now.', go(p) { const q = this.pl[p]; q.mass = Math.min(CELL_MAX, q.mass + 12); q.dna += 8; this.recalc(q); return 'Delicious.'; } }] },
+    { id: 'light', title: 'Light from above', text: 'Sunlight is breaking through the surface far above. The water there is warm and rich with life that eats light.',
+      choices: [
+        { label: 'Swim up into it', desc: 'Choose a mutation, with a chance at Chloroplasts.', go(p) { const P = G.players[p], ids = draftGenes(P, 2); if (!hasGene(P, 'chloro')) ids.unshift('chloro'); offerGenes(p, 'The light changes you.', { ids: ids.slice(0, 3) }); return ''; } },
+        { label: 'Stay in the shadows', desc: '+12 DNA, and nothing up there sees you.', go(p) { this.pl[p].dna += 12; return '+12 DNA.'; } }] },
+    { id: 'rival', title: 'A familiar shape', text: 'You pass a cell built just like your rival, drifting alone and weak.', when(p) { return G.mode === 2; },
+      choices: [
+        { label: 'Leave it a gift', desc: 'Your rival hears of it: they get 15 DNA, and you both earn trust.', go(p) { const o = this.pl[other(p)]; if (o) { o.dna += 15; toastP(o.p, `P${p + 1} helped one of your kind. +15 DNA.`, 'good'); } return 'A small kindness.'; } },
+        { label: 'Study it', desc: '+15 DNA for you.', go(p) { this.pl[p].dna += 15; return '+15 DNA.'; } }] },
+  ],
   teamHit(q, n) { if (!G.accord) return false; const o = this.pl[other(q.p)]; const r = o && o.lastOn === n && this.t - o.lastT < 1.6; q.lastOn = n; q.lastT = this.t; if (r) this.fx.text(n.x, n.r + 3, n.z, 'TEAM COMBO', '#f2b544'); return r; },
   updateBloom(dt) {
     this.bloomT -= dt;
@@ -300,7 +351,7 @@ const CellStage = {
     const q = this.pl[i]; if (!q) return; const h = 7.5 + q.k * 5, k = dt ? Math.min(1, dt * 4) : 1;
     _tv3.set(q.x, h, q.z + h * .55); cam.position.lerp(_tv3, k); cam.lookAt(cam.position.x, 0, cam.position.z - h * .55); if (q.shake > 0) { cam.position.x += (Math.random() - .5) * q.shake; cam.position.z += (Math.random() - .5) * q.shake; }
   },
-  beforeRender(i) { const q = this.pl[i]; if (q) this.scene.fog.density = .016 - Math.min(3, q.ab.A.sight) * .0025; },
+  beforeRender(i) { const q = this.pl[i]; if (q) this.scene.fog.density = (.016 - Math.min(3, q.ab.A.sight) * .0025) * (hasFlag(G.players[i], 'eyes') ? .7 : 1) * (hasFlag(G.players[i], 'night') ? .85 : 1); },
   labels(i) {
     const pane = Panes[i], me = this.pl[i];
     for (const o of this.pl) if (o !== me && !o.dead) { const s = project(_kv3.set(o.x, o.r * 1.4, o.z), i); if (s) pane.label(s.x, s.y, `<span style="color:${hueCss(G.players[o.p].hue)}">P${o.p + 1} · ${esc(G.players[o.p].name)}</span>`); }
@@ -308,6 +359,7 @@ const CellStage = {
     if (me && this.bloom) { const s = project(_kv3.set(this.bloom.x, 3, this.bloom.z), i); if (s) pane.label(s.x, s.y, '<b style="color:#ffd34d">DNA bloom</b>'); else CreatureStage.edge.call(this, pane, i, this.bloom.x, 0, this.bloom.z, 'DNA bloom', '#ffd34d'); }
     for (const o of this.pl) if (o !== me && !o.dead && me) CreatureStage.edge.call(this, pane, i, o.x, 0, o.z, `P${o.p + 1}`, hueCss(G.players[o.p].hue));
     Disc.labels(i, p => this.pl[p], s => 2, (pn, ii, x, y, z, h, c) => CreatureStage.edge.call(this, pn, ii, x, y, z, h, c));
+    if (me && !me.dead) { let best = null, bd = 16 + me.r * 2; for (const n of this.cells) { if (!this.canEngulf(me, n)) continue; const d = Math.hypot(n.x - me.x, n.z - me.z); if (d < bd) { bd = d; best = n; } } if (best) { const s = project(_kv3.set(best.x, best.r + 1.2, best.z), i); if (s) pane.label(s.x, s.y, `<small style="color:#bfe8ff">◌ engulf · ${KEYLABEL[i].a3}</small>`); } }
     if (me && !me.dead) {
       const radar = 35 + me.ab.A.sight * 25, r = paneRects[i];
       for (const n of this.cells) {
@@ -322,9 +374,9 @@ const CellStage = {
   hud(q) {
     const pane = Panes[q.p], A = q.ab.A, tot = q.plant + q.meat;
     pane.meter('hp', Math.max(0, q.hp), q.maxhp); pane.meter('gr', q.mass, CELL_GOAL, Math.min(100, Math.floor(q.mass / CELL_GOAL * 100)) + '%');
-    pane.stat('dna', q.dna); pane.stat('won', `${Disc.count(q.p)}/${Disc.list.length}`); pane.stat('size', (q.k * 10).toFixed(0) + 'µm'); pane.stat('diet', tot < 1 ? DIET_WORD[q.ab.diet] || 'none' : Math.round(q.meat / tot * 100) + '% meat');
+    pane.stat('dna', q.dna); pane.stat('won', `${Disc.count(q.p)}/${Disc.list.length}`); pane.stat('size', (q.k * 10).toFixed(0) + 'µm'); pane.stat('gen', (G.players[q.p].genes || []).length); pane.stat('diet', tot < 1 ? DIET_WORD[q.ab.diet] || 'none' : Math.round(q.meat / tot * 100) + '% meat');
     pane.acts([{ act: 'a1', label: 'Dash', icon: 'dash', cd: q.dashCd > 0 ? q.dashCd / 3 : 0 }, ...(A.shock ? [{ act: 'a2', label: 'Shock', icon: 'shock', cd: q.zapCd > 0 ? q.zapCd / 5 : 0 }] : []), { act: 'a3', label: q.bite ? 'Lunge' : 'Ram', icon: 'bite', cd: q.lungeCd > 0 ? q.lungeCd / .9 : 0 }, ...(G.mode === 2 && G.accord ? [{ act: 'a4', label: 'Gift 10', icon: 'mate', off: q.dna < 10 }] : []), { act: 'menu', label: 'Editor', icon: 'edit', hot: q.dna >= 15 }, { act: 'back', label: 'Menu', icon: 'menu', hot: canEvolve(q.p) }]);
-    if (!q.dead) pane.prompt(this.cells.some(n => n.windup > 0 && n.wTarget === q) ? 'Incoming lunge: dash away!' : this.vents.some(v => Math.hypot(q.x - v.x, q.z - v.z) < v.r + 6) ? 'Hot vent: it burns' : q.ab.diet === 'none' ? 'You have no mouth! Add one in the editor.' : '');
+    if (!q.dead) pane.prompt(this.cells.some(n => n.windup > 0 && n.wTarget === q) ? 'Incoming lunge: dash away!' : this.vents.some(v => Math.hypot(q.x - v.x, q.z - v.z) < v.r + 6) ? (hasFlag(G.players[q.p], 'heat') ? 'Hot vent: your Heat Scales feed on it' : 'Hot vent: it burns. Heat Scales would let you feed here') : q.ab.diet === 'none' ? 'You have no mouth! Add one in the editor.' : '');
   },
   musicMood() { return this.pl.some(q => this.cells.some(n => n.windup > 0 && n.wTarget === q) || (this.boss && Math.hypot(this.boss.x - q.x, this.boss.z - q.z) < 60)) ? 1 : this.bloom ? .3 : 0; },
   summary(p) { const q = this.pl[p], tot = q.plant + q.meat, mf = tot ? q.meat / tot : .5; return [`Ate ${Math.round(mf * 100)}% meat, killed ${q.kills} cells, died ${q.deaths} times.`, `Diet locked in: ${DIET_WORD[G.players[p].diet]}. Time to grow legs.`]; },

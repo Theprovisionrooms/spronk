@@ -19,6 +19,8 @@ class Pane {
       (stats.length ? `<dl class="stats">${stats.map(s => `<div data-s="${s.id}"><dt>${esc(s.label)}</dt><dd>–</dd></div>`).join('')}</dl>` : '');
     this.meters = {}; for (const m of meters) { const el = this.cardEl.querySelector(`[data-k="${m.id}"]`); this.meters[m.id] = { bar: el.querySelector('i'), val: el.querySelector('.mval'), last: '', w: '' }; }
     this.stats = {}; for (const s of stats) this.stats[s.id] = { el: this.cardEl.querySelector(`[data-s="${s.id}"] dd`), last: '' };
+    /* toasts sit just under the card, however tall the stage makes it */
+    if (G.mode === 2) this.toastsEl.style.top = Math.max(200, this.cardEl.offsetTop + this.cardEl.offsetHeight + 12) + 'px';
   }
   meter(id, v, max, txt) { const m = this.meters[id]; if (!m) return; const w = (clamp(v / max, 0, 1) * 100).toFixed(1) + '%'; if (w !== m.w) { m.bar.style.width = w; m.w = w; } const t = txt ?? `${Math.max(0, Math.round(v))}/${Math.round(max)}`; if (t !== m.last) { m.val.textContent = t; m.last = t; } }
   stat(id, v) { const s = this.stats[id]; if (!s) return; v = String(v); if (v !== s.last) { s.el.textContent = v; s.last = v; } }
